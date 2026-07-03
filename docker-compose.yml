@@ -27,7 +27,8 @@ services:
     build: ./frontend
     container_name: life_execution_frontend
     env_file:
-      - ./frontend/.env.local
+      - path: ./frontend/.env.local
+        required: false
     ports:
       - "3000:3000"
     depends_on:

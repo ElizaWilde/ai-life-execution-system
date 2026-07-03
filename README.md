@@ -97,6 +97,37 @@ The system uses several types of memory:
 | Notifications        | Telegram, Discord, Email, Push Notifications |
 | Deployment           | Docker, Railway, Fly.io                      |
 
+## Run the Coordinator Agent with Ollama Cloud
+
+1. Create an API key in your Ollama account.
+2. Copy `backend/.env.example` to `backend/.env` and replace
+   `OLLAMA_API_KEY` with your key.
+3. Start the backend and database:
+
+```powershell
+docker compose up --build backend
+```
+
+Test a basic conversation:
+
+```powershell
+$body = @{
+  message = "Help me choose one task to start now"
+  history = @()
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8000/coordinator/chat `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+For follow-up turns, send earlier `user` and `assistant` messages in `history`.
+The first version is intentionally stateless: the client owns conversation history,
+and the Coordinator does not call tools or persist memory yet. Interactive API docs
+are available at `http://localhost:8000/docs`.
+
 ## Execution Loop
 
 ```text

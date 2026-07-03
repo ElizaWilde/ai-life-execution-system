@@ -16,27 +16,27 @@ class LLMService:
         self.base_url = settings.ollama_base_url.rstrip("/")
         self.model = settings.ollama_model
         self.api_key = settings.ollama_api_key
+        self.timeout = settings.ollama_timeout_seconds
 
-    async def chat(self, system_prompt: str, user_prompt: str) -> str:
+    async def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history or [])
+        messages.append({"role": "user", "content": user_prompt})
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
+            "messages": messages,
             "stream": False,
         }
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
                 f"{self.base_url}/api/chat",
                 headers=headers,
@@ -45,7 +45,10 @@ class LLMService:
             response.raise_for_status()
 
         data = response.json()
-        return data["message"]["content"]
+        try:
+            return data["message"]["content"]
+        except (KeyError, TypeError) as exc:
+            raise ValueError("Ollama returned an invalid chat response") from exc
 
     async def generate_daily_plan(
         self,
