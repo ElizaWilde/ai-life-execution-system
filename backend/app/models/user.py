@@ -22,6 +22,11 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    ''' 
+        cascade="all, delete-orphan"
+        This is ORM-level behavior, it is controlled by SQLAlchemy in Python.
+        means: If the User is deleted, delete the WeeklyGoals too. If a WeeklyGoal is removed from the User, delete that WeeklyGoal too.
+    '''
     weekly_goals: Mapped[list["WeeklyGoal"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
