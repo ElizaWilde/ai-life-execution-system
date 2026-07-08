@@ -24,11 +24,17 @@ services:
       - "host.docker.internal:host-gateway"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     container_name: life_execution_frontend
     env_file:
       - path: ./frontend/.env.local
         required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3000
     ports:
       - "3000:3000"
     depends_on:

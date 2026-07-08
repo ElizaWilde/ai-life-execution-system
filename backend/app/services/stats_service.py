@@ -12,7 +12,7 @@ from app.schemas.dashboard import (
     WeekDashboardResponse,
 )
 
-
+# defines a class named StatsService. A class is a blueprint.
 class StatsService:
     """Build dashboard statistics from tasks, study sessions, and goals."""
 
@@ -148,5 +148,12 @@ class StatsService:
     def _week_start(value: date) -> date:
         return value - timedelta(days=value.weekday())
 
-
+# creates an object (instance) from that class.
 stats_service = StatsService()
+'''
+    StatsService                class / blueprint
+     ↓ creates
+    stats_service               object / instance
+     ↓ becomes
+    self                        name for that object inside its methods
+'''
