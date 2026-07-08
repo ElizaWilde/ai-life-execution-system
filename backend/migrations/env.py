@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from logging.config import fileConfig
+from pathlib import Path
+import sys
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import settings
 from app.database import Base
@@ -12,7 +18,7 @@ from app import models  # noqa: F401  # Import models so Base.metadata is popula
 
 config = context.config
 
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.file_config.has_section("formatters"):
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))

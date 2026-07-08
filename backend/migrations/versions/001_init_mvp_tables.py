@@ -2,7 +2,7 @@
 
 Revision ID: 001_init_mvp_tables
 Revises:
-Create Date: 2026-07-07
+Create Date: 2026-07-08
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """Create the initial MVP database schema."""
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -65,19 +66,28 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
+            "week_end >= week_start",
+            name="ck_weekly_goals_date_range",
+        ),
+        sa.CheckConstraint(
             "target_minutes IS NULL OR target_minutes >= 0",
             name="ck_weekly_goals_target_minutes",
         ),
-        sa.CheckConstraint("week_end >= week_start", name="ck_weekly_goals_date_range"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("notion_page_id"),
     )
     op.create_index(
-        op.f("ix_weekly_goals_status"), "weekly_goals", ["status"], unique=False
+        op.f("ix_weekly_goals_status"),
+        "weekly_goals",
+        ["status"],
+        unique=False,
     )
     op.create_index(
-        op.f("ix_weekly_goals_user_id"), "weekly_goals", ["user_id"], unique=False
+        op.f("ix_weekly_goals_user_id"),
+        "weekly_goals",
+        ["user_id"],
+        unique=False,
     )
     op.create_index(
         op.f("ix_weekly_goals_week_start"),
@@ -118,18 +128,29 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
-            ["weekly_goal_id"], ["weekly_goals.id"], ondelete="SET NULL"
+            ["weekly_goal_id"],
+            ["weekly_goals.id"],
+            ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
-        op.f("ix_daily_tasks_status"), "daily_tasks", ["status"], unique=False
+        op.f("ix_daily_tasks_status"),
+        "daily_tasks",
+        ["status"],
+        unique=False,
     )
     op.create_index(
-        op.f("ix_daily_tasks_task_date"), "daily_tasks", ["task_date"], unique=False
+        op.f("ix_daily_tasks_task_date"),
+        "daily_tasks",
+        ["task_date"],
+        unique=False,
     )
     op.create_index(
-        op.f("ix_daily_tasks_user_id"), "daily_tasks", ["user_id"], unique=False
+        op.f("ix_daily_tasks_user_id"),
+        "daily_tasks",
+        ["user_id"],
+        unique=False,
     )
     op.create_index(
         op.f("ix_daily_tasks_weekly_goal_id"),
@@ -169,7 +190,9 @@ def upgrade() -> None:
             name="ck_study_sessions_time_range",
         ),
         sa.ForeignKeyConstraint(
-            ["daily_task_id"], ["daily_tasks.id"], ondelete="SET NULL"
+            ["daily_task_id"],
+            ["daily_tasks.id"],
+            ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -237,11 +260,15 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
-        op.f("ix_daily_reviews_user_id"), "daily_reviews", ["user_id"], unique=False
+        op.f("ix_daily_reviews_user_id"),
+        "daily_reviews",
+        ["user_id"],
+        unique=False,
     )
 
 
 def downgrade() -> None:
+    """Drop the initial MVP database schema."""
     op.drop_index(op.f("ix_daily_reviews_user_id"), table_name="daily_reviews")
     op.drop_index(op.f("ix_daily_reviews_review_date"), table_name="daily_reviews")
     op.drop_table("daily_reviews")
