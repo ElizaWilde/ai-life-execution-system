@@ -26,8 +26,8 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/weekly-plan", label: "Weekly Plan" },
   { href: "/today", label: "Today" },
-  { href: "/timer", label: "Timer" },
   { href: "/review", label: "Review" },
+  { href: "/timer", label: "Timer" },
   { href: "/login", label: "User" },
 ];
 

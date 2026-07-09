@@ -3,11 +3,13 @@
     e.g. `main.py` creates the complete FastAPI application.`daily_tasks.py` defines the daily-task routes.
 '''
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     coordinator,
     daily_tasks,
     dashboard,
+    notion,
     reviews,
     study_sessions,
     weekly_goals,
@@ -16,9 +18,23 @@ from app.api import (
 # This creates the main web application.
 app = FastAPI(title="AI Life Execution System MVP")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(coordinator.router, prefix="/coordinator", tags=["Coordinator Agent"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
+app.include_router(notion.router, prefix="/notion", tags=["Notion"])
 app.include_router(weekly_goals.router, prefix="/weekly-goals", tags=["Weekly Goals"])
 
 # adds all routes from daily_tasks.router into app

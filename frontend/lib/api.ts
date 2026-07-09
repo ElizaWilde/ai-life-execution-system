@@ -1,5 +1,11 @@
 import { getStoredUserId } from "./auth";
 
+declare const process: {
+  env: {
+    NEXT_PUBLIC_API_BASE_URL?: string;
+  };
+};
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -57,6 +63,13 @@ export type TodayDashboard = {
   completed_tasks: number;
   completion_rate: number;
   unfinished_tasks: DailyTask[];
+  time_allocation: TimeAllocationPoint[];
+};
+
+export type TimeAllocationPoint = {
+  label: string;
+  planned_minutes: number;
+  focus_minutes: number;
 };
 
 export type WeekDashboard = {
@@ -68,7 +81,12 @@ export type WeekDashboard = {
   completion_rate: number;
   active_goals: number;
   completed_goals: number;
-  daily_focus: { date: string; focus_minutes: number }[];
+  daily_focus: {
+    date: string;
+    focus_minutes: number;
+    planned_minutes: number;
+  }[];
+  time_allocation: TimeAllocationPoint[];
 };
 
 export type DailyReview = {
@@ -159,6 +177,8 @@ export const api = {
   getTodaySessions: () => request<StudySession[]>("/study-sessions/today"),
 
   getTodayDashboard: () => request<TodayDashboard>("/dashboard/today"),
+  getDayDashboard: (date: string) =>
+    request<TodayDashboard>(`/dashboard/today?date=${date}`),
   getWeekDashboard: () => request<WeekDashboard>("/dashboard/week"),
 
   generateReview: (body: { review_date?: string }) =>

@@ -61,6 +61,18 @@ def test_today_dashboard_stats(client, user_headers):
     assert [task["title"] for task in body["unfinished_tasks"]] == [
         "Write dashboard API tests"
     ]
+    assert body["time_allocation"] == [
+        {
+            "label": "Finish dashboard service",
+            "planned_minutes": 45,
+            "focus_minutes": 35,
+        },
+        {
+            "label": "Write dashboard API tests",
+            "planned_minutes": 30,
+            "focus_minutes": 0,
+        },
+    ]
 
 
 def test_week_dashboard_stats(client, user_headers):
@@ -153,3 +165,6 @@ def test_week_dashboard_stats(client, user_headers):
     assert body["completed_goals"] == 1
     assert len(body["daily_focus"]) == 7
     assert sum(point["focus_minutes"] for point in body["daily_focus"]) == 50
+    assert all("planned_minutes" in point for point in body["daily_focus"])
+    assert body["time_allocation"][0]["label"] == "Complete dashboard endpoint"
+    assert body["time_allocation"][0]["focus_minutes"] == 50
