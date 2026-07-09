@@ -1,1 +1,6 @@
+.gitkeep is an empty placeholder file.It is merely a community convention, not an official Git feature.
 
+Git does not track empty directories. Therefore, if public/ contains no files, Git would normally omit it.Adding: public/.gitkeep forces Git to preserve the public directory.
+
+
+The public directory is where Next.js stores static assets.

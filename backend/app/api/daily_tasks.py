@@ -2,14 +2,12 @@ from datetime import date, datetime, timezone
 # Annotated attaches extra information to a type hint.
 from typing import Annotated
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 # select() creates a database SELECT statement.SQLAlchemy uses select() to construct queries that can then be executed through a Session.
 from sqlalchemy import select
 #Session is SQLAlchemy’s database-working object.A SQLAlchemy Session manages ORM objects and provides the interface for querying and modifying database data
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.dependencies import get_current_user, get_db
 from app.models import DailyTask, User, WeeklyGoal
 from app.schemas.daily_task import (
@@ -101,38 +99,21 @@ def get_today_tasks(
 
 
 @router.post("/generate", response_model=DailyPlanResponse, status_code=status.HTTP_201_CREATED)
+# An async def function can pause while waiting for slow operations. While it is paused, FastAPI can process other requests.
+# async def defines a function that can pause without blocking the server.
 async def generate_daily_plan(
     payload: DailyPlanGenerateRequest,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> DailyPlanResponse:
-    if not settings.ollama_api_key or settings.ollama_api_key == "your_ollama_api_key":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OLLAMA_API_KEY is not configured",
-        )
-
-    try:
-        return await planning_service.generate_daily_plan(
-            db=db,
-            user_id=user.id,
-            available_minutes=payload.available_minutes,
-            task_date=payload.task_date,
-        )
-    except httpx.HTTPStatusError as exc:
-        try:
-            upstream_detail = exc.response.json().get("error", "request rejected")
-        except (ValueError, AttributeError):
-            upstream_detail = "request rejected"
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Ollama Cloud error ({exc.response.status_code}): {upstream_detail}",
-        ) from exc
-    except (httpx.RequestError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Ollama Cloud request failed",
-        ) from exc
+    # Start this asynchronous operation, pause this route until its result is ready, and then continue.
+    # await waits for another asynchronous operation and obtains its final result.
+    return await planning_service.generate_daily_plan(
+        db=db,
+        user_id=user.id,
+        available_minutes=payload.available_minutes,
+        task_date=payload.task_date,
+    )
 
 
 @router.patch("/{task_id}", response_model=DailyTaskRead)

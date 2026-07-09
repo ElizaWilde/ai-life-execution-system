@@ -1,4 +1,6 @@
+
 {
+  "_comment": "Describes the frontend Node.js project.Its main purposes are:Listing frontend dependencies、Defining commands such as pnpm dev and pnpm build、Recording project metadata、Controlling package versions",
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "dev": "next dev",
