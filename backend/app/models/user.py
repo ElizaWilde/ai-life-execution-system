@@ -39,3 +39,6 @@ class User(Base):
     daily_reviews: Mapped[list["DailyReview"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    daily_check_ins: Mapped[list["DailyCheckIn"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )

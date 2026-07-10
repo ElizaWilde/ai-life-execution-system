@@ -141,7 +141,7 @@ export default function DashboardPage() {
     <section className="dash-page">
       <header className="dash-topbar">
         <div className="dash-title-lockup">
-          <span className="dash-mark">Nº</span>
+          <span className="dash-mark">mewo</span>
           <div>
             <strong>Life Execution</strong>
             <span>Personal dashboard</span>

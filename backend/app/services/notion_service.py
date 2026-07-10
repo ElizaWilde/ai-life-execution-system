@@ -36,6 +36,7 @@ class NotionService:
 
             response = await self._request(
                 "POST",
+                # In Python, the f before a string means "f-string" (formatted string literal).It allows you to insert variables or expressions directly inside {} in a string.
                 f"/databases/{self._database_id()}/query",
                 json=payload,
             )
@@ -43,7 +44,7 @@ class NotionService:
 
             for page in body.get("results", []):
                 goal_data = self._page_to_weekly_goal(page)
-                page_id = page.get("id")
+                page_id = page.get("id") 
                 if not page_id or goal_data is None:
                     continue
 
@@ -110,11 +111,20 @@ class NotionService:
         )
         return str(response.json()["id"])
 
+    # A leading underscore means This method is intended for internal use inside the class.(only a convention)
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         api_key = settings.notion_api_key
         if not api_key or api_key == "your_notion_api_key":
+            # raise stops the function and produces an exception
             raise NotionConfigurationError("NOTION_API_KEY is not configured")
-
+        '''
+            httpx.AsyncClient(...) -> Creates an asynchronous HTTP client.
+            as client -> Assigns the created client to the variable client.
+            async with -> Uses an asynchronous context manager.It automatically:
+                Opens or initializes the client.
+                Runs the indented block.
+                Closes the client when the block finishes.
+        '''
         async with httpx.AsyncClient(
             base_url=self.api_base_url,
             timeout=30,
