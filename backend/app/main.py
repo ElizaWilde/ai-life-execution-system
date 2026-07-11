@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    check_ins,
     coordinator,
     daily_tasks,
     dashboard,
@@ -33,6 +34,7 @@ app.add_middleware(
 
 app.include_router(coordinator.router, prefix="/coordinator", tags=["Coordinator Agent"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+app.include_router(check_ins.router, prefix="/check-ins", tags=["Check-ins"])
 app.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
 app.include_router(notion.router, prefix="/notion", tags=["Notion"])
 app.include_router(weekly_goals.router, prefix="/weekly-goals", tags=["Weekly Goals"])

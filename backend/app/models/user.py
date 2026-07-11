@@ -23,8 +23,18 @@ class User(Base):
     )
 
     ''' 
-        cascade="all, delete-orphan"
-        This is ORM-level behavior, it is controlled by SQLAlchemy in Python.
+    A User object has a list of related WeeklyGoal objects, and SQLAlchemy manages the connection between them.
+        (1)relationship(...) in SQLAlchemy defines the Python-side connection between ORM models.
+            This means user.weekly_goals returns all WeeklyGoal objects belonging to that User.
+        (2)Mapped[list["WeeklyGoal"]] is the type annotation. user.weekly_goals is a list of WeeklyGoal objects, This represents a one-to-many relationship.
+        (3)back_populates="user" connects the two sides of the relationship.
+            On User: weekly_goals = relationship(back_populates="user")
+            On WeeklyGoal: user = relationship(back_populates="weekly_goals")
+            The names must point to each other:
+                User.weekly_goals
+                        ↕
+                WeeklyGoal.user
+        (4)cascade="all, delete-orphan" -> This is ORM-level behavior, it is controlled by SQLAlchemy in Python.
         means: If the User is deleted, delete the WeeklyGoals too. If a WeeklyGoal is removed from the User, delete that WeeklyGoal too.
     '''
     weekly_goals: Mapped[list["WeeklyGoal"]] = relationship(
@@ -40,5 +50,8 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     daily_check_ins: Mapped[list["DailyCheckIn"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    coaching_recommendations: Mapped[list["CoachingRecommendation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )

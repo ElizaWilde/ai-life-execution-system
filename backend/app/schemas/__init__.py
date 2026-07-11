@@ -5,6 +5,14 @@ from app.schemas.daily_task import (
     DailyTaskRead,
     DailyTaskUpdate,
 )
+from app.schemas.daily_check_in import (
+    DailyCheckInCreate,
+    DailyCheckInRead,
+    DailyCheckInUpdate,
+    EnergyLevel,
+    MoodLevel,
+)
+from app.schemas.coaching import CoachingContext, WorkloadAdjustment, WorkloadLevel
 from app.schemas.dashboard import TodayDashboardResponse, WeekDashboardResponse
 from app.schemas.review import (
     DailyReviewCreate,
@@ -26,12 +34,20 @@ from app.schemas.weekly_goal import (
 __all__ = [
     "DailyPlanGenerateRequest",
     "DailyPlanResponse",
+    "CoachingContext",
+    "WorkloadAdjustment",
+    "WorkloadLevel",
+    "DailyCheckInCreate",
+    "DailyCheckInRead",
+    "DailyCheckInUpdate",
     "DailyReviewCreate",
     "DailyReviewGenerateRequest",
     "DailyReviewRead",
     "DailyTaskCreate",
     "DailyTaskRead",
     "DailyTaskUpdate",
+    "EnergyLevel",
+    "MoodLevel",
     "StudySessionFinish",
     "StudySessionRead",
     "StudySessionStart",
