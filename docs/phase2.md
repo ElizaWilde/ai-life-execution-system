@@ -945,7 +945,7 @@ That is the main Phase 2 adaptation feature.
 
 # Step 12 — Implement weekly review generation
 
-Create:
+Create: 
 
 ```text
 app/models/weekly_review.py

@@ -66,3 +66,35 @@ class CoachingRecommendationRead(BaseModel):
     prompt_version: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class CoachingRecommendationGenerateRequest(BaseModel):
+    target_date: date
+
+
+class CoachingRecommendationResponse(BaseModel):
+    recommendation_date: date
+    readiness_score: float = Field(ge=0, le=100)
+    workload_multiplier: float = Field(ge=0)
+    workload_level: WorkloadLevel
+    summary: str
+    suggestions: list[str]
+    risk_factors: list[str]
+    planning_changes: list[str]
+
+    @classmethod
+    def from_recommendation(
+        cls,
+        recommendation: CoachingRecommendationRead,
+    ) -> "CoachingRecommendationResponse":
+        advice = recommendation.recommendations_json
+        return cls(
+            recommendation_date=recommendation.recommendation_date,
+            readiness_score=recommendation.readiness_score,
+            workload_multiplier=recommendation.workload_multiplier,
+            workload_level=recommendation.workload_level,
+            summary=recommendation.summary,
+            suggestions=advice.suggestions,
+            risk_factors=advice.risk_factors,
+            planning_changes=advice.planning_changes,
+        )

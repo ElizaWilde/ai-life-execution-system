@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.models import DailyTask, WeeklyGoal
 from app.schemas.daily_task import DailyPlanResponse
+from app.services.coaching_context_service import coaching_context_service
 from app.services.llm_service import llm_service
+from app.services.workload_adjustment_service import workload_adjustment_service
 
 
 VALID_PRIORITIES = {"low", "medium", "high"}
+PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 UNFINISHED_STATUSES = {"pending", "in_progress"}
 
 
@@ -26,13 +29,24 @@ class PlanningService:
         task_date: date | None = None,
     ) -> DailyPlanResponse:
         plan_date = task_date or date.today()
+        context = coaching_context_service.build_daily_context(
+            db=db,
+            user_id=user_id,
+            target_date=plan_date,
+            available_minutes=available_minutes,
+        )
+        adjustment = workload_adjustment_service.calculate(context)
+        adjusted_minutes = int(
+            available_minutes * adjustment.workload_multiplier
+        )
+
         weekly_goals = self._get_active_weekly_goals(db, user_id, plan_date)
         unfinished_tasks = self._get_unfinished_tasks(db, user_id, plan_date)
 
         generated_items = await llm_service.generate_daily_plan(
             weekly_goals=[self._weekly_goal_to_prompt(goal) for goal in weekly_goals],
             unfinished_tasks=[self._task_to_prompt(task) for task in unfinished_tasks],
-            available_minutes=available_minutes,
+            available_minutes=adjusted_minutes,
         )
 
         allowed_goal_ids = {goal.id for goal in weekly_goals}
@@ -42,7 +56,7 @@ class PlanningService:
             plan_date=plan_date,
             generated_items=generated_items,
             allowed_goal_ids=allowed_goal_ids,
-            available_minutes=available_minutes,
+            available_minutes=adjusted_minutes,
         )
 
         db.commit()
@@ -51,6 +65,10 @@ class PlanningService:
 
         return DailyPlanResponse(
             task_date=plan_date,
+            original_available_minutes=available_minutes,
+            adjusted_available_minutes=adjusted_minutes,
+            workload_level=adjustment.workload_level,
+            readiness_score=adjustment.readiness_score,
             tasks=created_tasks,
             total_estimated_minutes=sum(
                 task.estimated_minutes or 0 for task in created_tasks
@@ -106,10 +124,17 @@ class PlanningService:
         created_tasks: list[DailyTask] = []
         remaining_minutes = available_minutes
 
-        for item in generated_items:
-            normalized = self._normalize_plan_item(item, allowed_goal_ids)
-            if normalized is None:
-                continue
+        normalized_items = [
+            normalized
+            for item in generated_items
+            if (normalized := self._normalize_plan_item(item, allowed_goal_ids))
+            is not None
+        ]
+        normalized_items.sort(key=lambda item: PRIORITY_ORDER[item["priority"]])
+
+        for normalized in normalized_items:
+            if remaining_minutes <= 0:
+                break
 
             estimated_minutes = normalized["estimated_minutes"]
             if estimated_minutes is not None and estimated_minutes > remaining_minutes:

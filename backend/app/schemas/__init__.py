@@ -24,7 +24,9 @@ from app.schemas.daily_check_in import (
 from app.schemas.coaching import (
     CoachingAdvice,
     CoachingContext,
+    CoachingRecommendationGenerateRequest,
     CoachingRecommendationRead,
+    CoachingRecommendationResponse,
     WorkloadAdjustment,
     WorkloadLevel,
 )
@@ -51,7 +53,9 @@ __all__ = [
     "DailyPlanResponse",
     "CoachingAdvice",
     "CoachingContext",
+    "CoachingRecommendationGenerateRequest",
     "CoachingRecommendationRead",
+    "CoachingRecommendationResponse",
     "WorkloadAdjustment",
     "WorkloadLevel",
     "DailyCheckInCreate",

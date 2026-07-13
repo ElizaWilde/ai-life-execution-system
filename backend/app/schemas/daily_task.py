@@ -36,6 +36,8 @@ JSON response to frontend
 '''
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.coaching import WorkloadLevel
+
 # Literal means the value must be one of the exact values you list.
 Priority = Literal["low", "medium", "high"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
@@ -86,6 +88,10 @@ class DailyTaskRead(DailyTaskBase):
 
 class DailyPlanResponse(BaseModel):
     task_date: date
+    original_available_minutes: int = Field(ge=0)
+    adjusted_available_minutes: int = Field(ge=0)
+    workload_level: WorkloadLevel
+    readiness_score: float = Field(ge=0, le=100)
     # tasks must be a list, and every item in the list must be a DailyTaskRead object.
     tasks: list[DailyTaskRead]
     total_estimated_minutes: int = Field(ge=0)
