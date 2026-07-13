@@ -77,6 +77,6 @@ class DailyReview(Base):
     '''
         Why "User" has quotes? This is a forward reference: the User class may be defined later or imported in a way that would otherwise cause a circular reference
         meaning: "User" means the User class, but Python does not need to resolve it immediately
-        back_populates="daily_reviews" means It connects this relationship with the matching relationship inside the User model
+        
     '''
     user: Mapped["User"] = relationship(back_populates="daily_reviews")

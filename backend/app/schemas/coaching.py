@@ -1,11 +1,15 @@
-from datetime import date
-from typing import Literal
+from datetime import date, datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.schemas.daily_check_in import EnergyLevel, MoodLevel
 
 WorkloadLevel = Literal["light", "reduced", "normal"]
+RecommendationText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
+]
 
 
 class CoachingContext(BaseModel):
@@ -33,3 +37,32 @@ class WorkloadAdjustment(BaseModel):
     workload_multiplier: float = Field(ge=0)
     workload_level: WorkloadLevel
     reasons: list[str]
+
+
+class CoachingAdvice(BaseModel):
+    """Validated JSON contract returned by the coaching LLM prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: RecommendationText
+    suggestions: list[RecommendationText]
+    risk_factors: list[RecommendationText]
+    planning_changes: list[RecommendationText]
+
+
+class CoachingRecommendationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    recommendation_date: date
+    readiness_score: float = Field(ge=0, le=100)
+    workload_multiplier: float = Field(ge=0)
+    workload_level: WorkloadLevel
+    adjustment_reasons_json: list[str]
+    summary: str
+    recommendations_json: CoachingAdvice
+    model_name: str | None
+    prompt_version: str | None
+    created_at: datetime
+    updated_at: datetime

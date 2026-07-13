@@ -30,7 +30,7 @@ Database
     ↓
 SQLAlchemy object
     ↓
-Pydantic response schema
+Pydantic response schema 
     ↓
 JSON response to frontend
 '''

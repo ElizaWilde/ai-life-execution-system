@@ -11,6 +11,10 @@ import httpx
 from app.config import settings
 
 
+class LLMResponseError(ValueError):
+    """Raised when Ollama returns a response that violates the requested shape."""
+
+
 class LLMService:
     def __init__(self):
         self.base_url = settings.ollama_base_url.rstrip("/")
@@ -24,6 +28,41 @@ class LLMService:
         user_prompt: str,
         history: list[dict[str, str]] | None = None,
     ) -> str:
+        return await self._request_chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            history=history,
+        )
+
+    async def generate_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> dict:
+        """Request and validate a JSON object from the configured Ollama model."""
+        raw = await self._request_chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format="json",
+        )
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise LLMResponseError("Ollama returned invalid JSON") from exc
+
+        if not isinstance(result, dict):
+            raise LLMResponseError("Ollama JSON response must be an object")
+
+        return result
+
+    async def _request_chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        history: list[dict[str, str]] | None = None,
+        response_format: str | None = None,
+    ) -> str:
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(history or [])
         messages.append({"role": "user", "content": user_prompt})
@@ -32,6 +71,9 @@ class LLMService:
             "messages": messages,
             "stream": False,
         }
+        if response_format is not None:
+            payload["format"] = response_format
+
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -46,9 +88,14 @@ class LLMService:
 
         data = response.json()
         try:
-            return data["message"]["content"]
+            content = data["message"]["content"]
         except (KeyError, TypeError) as exc:
-            raise ValueError("Ollama returned an invalid chat response") from exc
+            raise LLMResponseError("Ollama returned an invalid chat response") from exc
+
+        if not isinstance(content, str):
+            raise LLMResponseError("Ollama chat content must be a string")
+
+        return content
 
     async def generate_daily_plan(
         self,
