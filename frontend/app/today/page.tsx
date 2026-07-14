@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import { api, DailyTask, Priority } from "../../lib/api";
+import { AdaptiveDailyPlan, api, DailyTask, Priority } from "../../lib/api";
 
 function isoToday() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
 export default function TodayPage() {
@@ -14,6 +16,7 @@ export default function TodayPage() {
   const [minutes, setMinutes] = useState("30");
   const [priority, setPriority] = useState<Priority>("medium");
   const [availableMinutes, setAvailableMinutes] = useState("90");
+  const [generatedPlan, setGeneratedPlan] = useState<AdaptiveDailyPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -64,7 +67,10 @@ export default function TodayPage() {
         available_minutes: Number(availableMinutes),
         task_date: isoToday(),
       });
-      setMessage(`Generated ${result.tasks.length} tasks (${result.total_estimated_minutes} min).`);
+      setGeneratedPlan(result);
+      setMessage(
+        `Generated ${result.tasks.length} tasks using ${result.adjusted_available_minutes} of ${result.original_available_minutes} available minutes.`,
+      );
       await loadTasks();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate plan");
@@ -91,9 +97,49 @@ export default function TodayPage() {
       {error ? <div className="error">{error}</div> : null}
       {message ? <div className="success">{message}</div> : null}
 
+      {generatedPlan ? (
+        <article className="card adaptive-plan-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Adaptive plan</p>
+              <h2>Your capacity shaped this plan</h2>
+            </div>
+            <span className={`workload-pill ${generatedPlan.workload_level}`}>
+              {generatedPlan.workload_level}
+            </span>
+          </div>
+          <div className="capacity-flow">
+            <div>
+              <span>Time available</span>
+              <strong>{generatedPlan.original_available_minutes} min</strong>
+            </div>
+            <i>→</i>
+            <div>
+              <span>Planning capacity</span>
+              <strong>{generatedPlan.adjusted_available_minutes} min</strong>
+            </div>
+            <i>→</i>
+            <div>
+              <span>Tasks scheduled</span>
+              <strong>{generatedPlan.total_estimated_minutes} min</strong>
+            </div>
+          </div>
+          <div className="capacity-note">
+            <strong>{Math.round(generatedPlan.readiness_score)} readiness</strong>
+            <span>
+              High-priority work is considered before optional work. Existing tasks
+              are never deleted when capacity is reduced.
+            </span>
+          </div>
+        </article>
+      ) : null}
+
       <div className="grid two">
         <div className="card">
           <h2>Generate today’s plan</h2>
+          <p className="muted">
+            Your latest check-in determines the workload multiplier used here.
+          </p>
           <label className="field">
             <span>Available minutes</span>
             <input className="input" type="number" min="1" value={availableMinutes} onChange={(event) => setAvailableMinutes(event.target.value)} />
@@ -101,6 +147,9 @@ export default function TodayPage() {
           <button className="button primary" disabled={busy} onClick={generatePlan}>
             {busy ? "Working..." : "Generate AI plan"}
           </button>
+          <Link className="inline-link" href="/check-in">
+            Review today’s condition first →
+          </Link>
         </div>
 
         <div className="card">

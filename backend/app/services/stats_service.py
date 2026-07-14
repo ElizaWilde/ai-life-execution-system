@@ -5,7 +5,17 @@ from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import DailyTask, StudySession, WeeklyGoal
+from app.models import (
+    CoachingRecommendation,
+    DailyCheckIn,
+    DailyTask,
+    StudySession,
+    WeeklyGoal,
+)
+from app.schemas.coaching import (
+    CoachingRecommendationRead,
+    CoachingRecommendationResponse,
+)
 from app.schemas.dashboard import (
     DailyFocusPoint,
     TimeAllocationPoint,
@@ -46,6 +56,19 @@ class StatsService:
 
         focus_minutes = self._focus_minutes_between(db, user_id, day_start, day_end)
         sessions = self._sessions_between(db, user_id, day_start, day_end)
+        check_in = db.scalar(
+            select(DailyCheckIn).where(
+                DailyCheckIn.user_id == user_id,
+                DailyCheckIn.check_in_date == dashboard_date,
+            )
+        )
+        coaching_record = db.scalar(
+            select(CoachingRecommendation).where(
+                CoachingRecommendation.user_id == user_id,
+                CoachingRecommendation.recommendation_date == dashboard_date,
+            )
+        )
+        coaching = self._coaching_response(coaching_record)
 
         return TodayDashboardResponse(
             date=dashboard_date,
@@ -55,6 +78,22 @@ class StatsService:
             completion_rate=self._completion_rate(completed_tasks, planned_tasks),
             unfinished_tasks=unfinished_tasks,
             time_allocation=self._time_allocation(tasks, sessions),
+            check_in=check_in,
+            coaching=coaching,
+            readiness_score=(
+                coaching_record.readiness_score if coaching_record else None
+            ),
+            workload_multiplier=(
+                coaching_record.workload_multiplier if coaching_record else None
+            ),
+            workload_level=(
+                coaching_record.workload_level if coaching_record else None
+            ),
+            adjustment_reasons=(
+                coaching_record.adjustment_reasons_json
+                if coaching_record
+                else []
+            ),
         )
 
     def get_week_dashboard(
@@ -200,6 +239,15 @@ class StatsService:
             )
         )
         return sum(session.duration_minutes or 0 for session in sessions)
+
+    @staticmethod
+    def _coaching_response(
+        recommendation: CoachingRecommendation | None,
+    ) -> CoachingRecommendationResponse | None:
+        if recommendation is None:
+            return None
+        read_model = CoachingRecommendationRead.model_validate(recommendation)
+        return CoachingRecommendationResponse.from_recommendation(read_model)
 
     @staticmethod
     def _completion_rate(completed_tasks: int, planned_tasks: int) -> float:

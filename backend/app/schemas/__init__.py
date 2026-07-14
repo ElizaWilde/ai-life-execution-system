@@ -47,6 +47,12 @@ from app.schemas.weekly_goal import (
     WeeklyGoalRead,
     WeeklyGoalUpdate,
 )
+from app.schemas.weekly_review import (
+    WeeklyReviewAdvice,
+    WeeklyReviewContext,
+    WeeklyReviewGenerateRequest,
+    WeeklyReviewRead,
+)
 
 __all__ = [
     "DailyPlanGenerateRequest",
@@ -81,4 +87,8 @@ __all__ = [
     "WeeklyGoalCreate",
     "WeeklyGoalRead",
     "WeeklyGoalUpdate",
+    "WeeklyReviewAdvice",
+    "WeeklyReviewContext",
+    "WeeklyReviewGenerateRequest",
+    "WeeklyReviewRead",
 ]

@@ -11,6 +11,9 @@ const API_BASE_URL =
 
 export type Priority = "low" | "medium" | "high";
 export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
+export type EnergyLevel = "depleted" | "low" | "steady" | "high" | "energized";
+export type MoodLevel = "struggling" | "low" | "neutral" | "good" | "great";
+export type WorkloadLevel = "light" | "reduced" | "normal";
 
 export type WeeklyGoal = {
   id: number;
@@ -64,6 +67,48 @@ export type TodayDashboard = {
   completion_rate: number;
   unfinished_tasks: DailyTask[];
   time_allocation: TimeAllocationPoint[];
+  check_in: DailyCheckIn | null;
+  coaching: CoachingRecommendation | null;
+  readiness_score: number | null;
+  workload_multiplier: number | null;
+  workload_level: WorkloadLevel | null;
+  adjustment_reasons: string[];
+};
+
+export type DailyCheckIn = {
+  id: number;
+  user_id: number;
+  check_in_date: string;
+  energy_level: EnergyLevel;
+  mood_level: MoodLevel;
+  sleep_hours: number;
+  stress_level: number | null;
+  notes: string | null;
+  cycle_day: number | null;
+  cycle_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CoachingRecommendation = {
+  recommendation_date: string;
+  readiness_score: number;
+  workload_multiplier: number;
+  workload_level: WorkloadLevel;
+  summary: string;
+  suggestions: string[];
+  risk_factors: string[];
+  planning_changes: string[];
+};
+
+export type AdaptiveDailyPlan = {
+  task_date: string;
+  original_available_minutes: number;
+  adjusted_available_minutes: number;
+  workload_level: WorkloadLevel;
+  readiness_score: number;
+  tasks: DailyTask[];
+  total_estimated_minutes: number;
 };
 
 export type TimeAllocationPoint = {
@@ -99,6 +144,30 @@ export type DailyReview = {
   completed_tasks: number;
   focus_minutes: number;
   source: "manual" | "ai";
+  created_at: string;
+  updated_at: string;
+};
+
+export type WeeklyReview = {
+  id: number;
+  user_id: number;
+  week_start: string;
+  week_end: string;
+  planned_tasks: number;
+  completed_tasks: number;
+  completion_rate: number;
+  focus_minutes: number;
+  check_in_days: number;
+  average_sleep_hours: number | null;
+  energy_distribution_json: Record<string, number>;
+  mood_distribution_json: Record<string, number>;
+  summary: string;
+  achievements_json: string[];
+  obstacles_json: string[];
+  next_week_actions_json: string[];
+  context_json: Record<string, unknown>;
+  model_name: string | null;
+  prompt_version: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -159,10 +228,34 @@ export const api = {
   updateTask: (id: number, body: Partial<DailyTask>) =>
     request<DailyTask>(`/daily-tasks/${id}`, { method: "PATCH", body }),
   generatePlan: (body: { available_minutes: number; task_date?: string }) =>
-    request<{ task_date: string; tasks: DailyTask[]; total_estimated_minutes: number }>(
+    request<AdaptiveDailyPlan>(
       "/daily-tasks/generate",
       { method: "POST", body },
     ),
+
+  getTodayCheckIn: () => request<DailyCheckIn>("/check-ins/today"),
+  createCheckIn: (body: {
+    check_in_date?: string;
+    energy_level: EnergyLevel;
+    mood_level: MoodLevel;
+    sleep_hours: number;
+    stress_level?: number | null;
+    notes?: string | null;
+    cycle_day?: number | null;
+    cycle_notes?: string | null;
+  }) => request<DailyCheckIn>("/check-ins", { method: "POST", body }),
+  updateCheckIn: (
+    date: string,
+    body: Partial<Omit<DailyCheckIn, "id" | "user_id" | "check_in_date" | "created_at" | "updated_at">>,
+  ) => request<DailyCheckIn>(`/check-ins/${date}`, { method: "PATCH", body }),
+
+  generateCoaching: (body: { target_date: string }) =>
+    request<CoachingRecommendation>("/coaching/daily/generate", {
+      method: "POST",
+      body,
+    }),
+  getCoaching: (date: string) =>
+    request<CoachingRecommendation>(`/coaching/daily?date=${date}`),
 
   startSession: (body: {
     daily_task_id?: number | null;
@@ -184,4 +277,11 @@ export const api = {
   generateReview: (body: { review_date?: string }) =>
     request<DailyReview>("/reviews/generate", { method: "POST", body }),
   getReview: (date: string) => request<DailyReview>(`/reviews/daily?date=${date}`),
+
+  generateWeeklyReview: (body: { week_start?: string }) =>
+    request<WeeklyReview>("/weekly-reviews/generate", { method: "POST", body }),
+  getCurrentWeeklyReview: () =>
+    request<WeeklyReview>("/weekly-reviews/current"),
+  getWeeklyReview: (weekStart: string) =>
+    request<WeeklyReview>(`/weekly-reviews/${weekStart}`),
 };

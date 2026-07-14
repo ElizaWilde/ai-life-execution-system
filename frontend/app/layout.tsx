@@ -24,9 +24,11 @@ export const metadata = {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/check-in", label: "Daily Check-in" },
   { href: "/weekly-plan", label: "Weekly Plan" },
   { href: "/today", label: "Today" },
-  { href: "/review", label: "Review" },
+  { href: "/review", label: "Daily Review" },
+  { href: "/weekly-review", label: "Weekly Review" },
   { href: "/timer", label: "Timer" },
   { href: "/login", label: "User" },
 ];

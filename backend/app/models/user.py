@@ -55,3 +55,6 @@ class User(Base):
     coaching_recommendations: Mapped[list["CoachingRecommendation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    weekly_reviews: Mapped[list["WeeklyReview"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )

@@ -15,6 +15,7 @@ from app.api import (
     reviews,
     study_sessions,
     weekly_goals,
+    weekly_reviews,
 )
 
 # This creates the main web application.
@@ -40,6 +41,11 @@ app.include_router(coaching.router, prefix="/coaching", tags=["Coaching"])
 app.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
 app.include_router(notion.router, prefix="/notion", tags=["Notion"])
 app.include_router(weekly_goals.router, prefix="/weekly-goals", tags=["Weekly Goals"])
+app.include_router(
+    weekly_reviews.router,
+    prefix="/weekly-reviews",
+    tags=["Weekly Reviews"],
+)
 
 # adds all routes from daily_tasks.router into app
 app.include_router(daily_tasks.router, prefix="/daily-tasks", tags=["Daily Tasks"])

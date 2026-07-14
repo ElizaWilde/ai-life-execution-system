@@ -265,6 +265,329 @@ textarea {
   height: 100%;
 }
 
+/* Phase 2 flow */
+.phase-page {
+  margin: 0 auto;
+  max-width: 1240px;
+  width: 100%;
+}
+
+.phase-page h2 {
+  margin: 4px 0 14px;
+}
+
+.phase-layout {
+  align-items: start;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+}
+
+.phase-form {
+  gap: 22px;
+}
+
+.phase-stack {
+  display: grid;
+  gap: 16px;
+  position: sticky;
+  top: 24px;
+}
+
+.date-pill,
+.grounded-pill,
+.workload-pill {
+  background: #eef4ff;
+  border-radius: 999px;
+  color: #3538cd;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 8px 12px;
+  text-transform: capitalize;
+}
+
+.choice-grid {
+  display: grid;
+  gap: 9px;
+}
+
+.energy-choices,
+.mood-choices {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.choice-button {
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 15px;
+  color: #344054;
+  cursor: pointer;
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 13px;
+  text-align: left;
+}
+
+.choice-button small {
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.choice-button.compact {
+  align-items: center;
+  justify-items: center;
+  min-height: 48px;
+  text-align: center;
+}
+
+.choice-button.selected {
+  background: #eff4ff;
+  border-color: #6172f3;
+  box-shadow: 0 0 0 2px rgba(97, 114, 243, .12);
+  color: #3538cd;
+}
+
+.optional-panel {
+  background: #f9fafb;
+  border: 1px solid #eaecf0;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.optional-panel summary {
+  color: #344054;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.optional-panel[open] summary {
+  margin-bottom: 14px;
+}
+
+.section-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.workload-pill.light {
+  background: #fff1f3;
+  color: #c01048;
+}
+
+.workload-pill.reduced {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.workload-pill.normal {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.readiness-block {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: auto 1fr;
+  margin: 12px 0 20px;
+}
+
+.readiness-block > strong {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.readiness-block > span {
+  align-self: end;
+  color: #667085;
+  font-size: 13px;
+}
+
+.readiness-track {
+  background: #eaecf0;
+  border-radius: 999px;
+  grid-column: 1 / -1;
+  height: 7px;
+  margin-top: 7px;
+  overflow: hidden;
+}
+
+.readiness-track i {
+  background: linear-gradient(90deg, #7f56d9, #155eef);
+  display: block;
+  height: 100%;
+}
+
+.coaching-summary,
+.weekly-summary {
+  color: #344054;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.advice-list h3 {
+  font-size: 14px;
+  margin: 20px 0 8px;
+}
+
+.advice-list ul,
+.review-list-card ul {
+  color: #475467;
+  display: grid;
+  gap: 8px;
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.empty-panel,
+.empty-review-card {
+  background: #f9fafb;
+  border: 1px dashed #d0d5dd;
+  border-radius: 16px;
+  margin: 18px 0;
+  padding: 18px;
+}
+
+.empty-panel p {
+  color: #667085;
+  line-height: 1.5;
+  margin-bottom: 0;
+}
+
+.next-step-card .button {
+  margin-top: 8px;
+}
+
+.inline-link {
+  color: #155eef;
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 16px;
+}
+
+.adaptive-plan-card {
+  background: linear-gradient(135deg, #f5f8ff, #fff);
+  border-color: #c7d7fe;
+}
+
+.capacity-flow {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  margin-top: 18px;
+}
+
+.capacity-flow > div {
+  background: white;
+  border: 1px solid #dbe5ff;
+  border-radius: 14px;
+  display: grid;
+  gap: 5px;
+  padding: 15px;
+}
+
+.capacity-flow span,
+.capacity-note span,
+.metric-card span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.capacity-flow i {
+  color: #6172f3;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.capacity-note {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.review-controls {
+  align-items: end;
+  display: flex;
+  gap: 10px;
+}
+
+.grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric-card strong {
+  display: block;
+  font-size: 34px;
+  margin-bottom: 4px;
+}
+
+.weekly-summary-card {
+  border-left: 5px solid #6172f3;
+}
+
+.grounded-pill {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.distribution-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.distribution-list span {
+  background: #f2f4f7;
+  border-radius: 999px;
+  color: #475467;
+  display: inline-flex;
+  font-size: 13px;
+  gap: 7px;
+  padding: 8px 11px;
+  text-transform: capitalize;
+}
+
+.review-list-card {
+  border-top: 4px solid #98a2b3;
+}
+
+.review-list-card.positive {
+  border-top-color: #12b76a;
+}
+
+.review-list-card.caution {
+  border-top-color: #f79009;
+}
+
+.review-list-card.action {
+  border-top-color: #6172f3;
+}
+
+.empty-review-card {
+  align-items: center;
+  display: flex;
+  gap: 22px;
+  margin: 0;
+}
+
+.empty-orbit {
+  align-items: center;
+  background: #eef4ff;
+  border-radius: 50%;
+  color: #3538cd;
+  display: flex;
+  font-size: 20px;
+  font-weight: 900;
+  height: 68px;
+  justify-content: center;
+  width: 68px;
+}
+
 /* Dashboard */
 .dash-page {
   color: #171715;
@@ -904,9 +1227,38 @@ textarea {
     position: static;
   }
 
+  .page-header {
+    flex-direction: column;
+  }
+
   .grid.two,
-  .grid.three {
+  .grid.three,
+  .grid.four,
+  .phase-layout {
     grid-template-columns: 1fr;
+  }
+
+  .phase-stack {
+    position: static;
+  }
+
+  .energy-choices,
+  .mood-choices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-controls,
+  .capacity-note {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .capacity-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .capacity-flow > i {
+    transform: rotate(90deg);
   }
 
   .main-content {

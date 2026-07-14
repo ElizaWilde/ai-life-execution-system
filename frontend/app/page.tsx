@@ -4,14 +4,14 @@ export default function HomePage() {
   return (
     <section className="hero">
       <p className="eyebrow">AI Life Execution System</p>
-      <h1>Plan the week, execute today, review tonight.</h1>
+      <h1>Check in, plan with your capacity, and review what happened.</h1>
       <p className="muted">
-        Use the MVP flow to create weekly goals, generate daily tasks, track study
-        sessions, and summarize progress.
+        Use the Phase 2 loop to describe today’s condition, generate a realistic
+        workload, track execution, and create grounded daily and weekly reviews.
       </p>
       <div className="actions">
-        <Link href="/weekly-plan" className="button primary">
-          Start weekly plan
+        <Link href="/check-in" className="button primary">
+          Start today’s check-in
         </Link>
         <Link href="/dashboard" className="button secondary">
           View dashboard
@@ -20,4 +20,3 @@ export default function HomePage() {
     </section>
   );
 }
-   
