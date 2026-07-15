@@ -14,6 +14,26 @@ export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type EnergyLevel = "depleted" | "low" | "steady" | "high" | "energized";
 export type MoodLevel = "struggling" | "low" | "neutral" | "good" | "great";
 export type WorkloadLevel = "light" | "reduced" | "normal";
+export type NotificationChannel = "in_app" | "email" | "telegram";
+export type WorkingDay = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+
+export type AutomationPreferences = {
+  id: number;
+  user_id: number;
+  timezone: string;
+  morning_reminder_time: string;
+  evening_review_time: string;
+  notification_channel: NotificationChannel;
+  automatic_rescheduling_enabled: boolean;
+  confirmation_required: boolean;
+  max_reminders_per_day: number;
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  working_days: WorkingDay[];
+  preferred_study_periods: { start: string; end: string }[];
+  created_at: string;
+  updated_at: string;
+};
 
 export type WeeklyGoal = {
   id: number;
@@ -203,6 +223,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  getAutomationPreferences: () =>
+    request<AutomationPreferences>("/automation-preferences"),
+  updateAutomationPreferences: (body: Partial<Omit<AutomationPreferences, "id" | "user_id" | "created_at" | "updated_at">>) =>
+    request<AutomationPreferences>("/automation-preferences", { method: "PATCH", body }),
+
   getCurrentGoals: () => request<WeeklyGoal[]>("/weekly-goals/current"),
   createGoal: (body: {
     title: string;

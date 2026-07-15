@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    automation_preferences,
     check_ins,
     coaching,
     coordinator,
@@ -35,6 +36,11 @@ app.add_middleware(
 )
 
 app.include_router(coordinator.router, prefix="/coordinator", tags=["Coordinator Agent"])
+app.include_router(
+    automation_preferences.router,
+    prefix="/automation-preferences",
+    tags=["Automation Preferences"],
+)
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(check_ins.router, prefix="/check-ins", tags=["Check-ins"])
 app.include_router(coaching.router, prefix="/coaching", tags=["Coaching"])

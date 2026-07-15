@@ -14,6 +14,13 @@ from app.schemas.daily_task import (
     DailyTaskRead,
     DailyTaskUpdate,
 )
+from app.schemas.automation_preference import (
+    AutomationPreferenceRead,
+    AutomationPreferenceUpdate,
+    NotificationChannel,
+    StudyPeriod,
+    WorkingDay,
+)
 from app.schemas.daily_check_in import (
     DailyCheckInCreate,
     DailyCheckInRead,
@@ -55,6 +62,8 @@ from app.schemas.weekly_review import (
 )
 
 __all__ = [
+    "AutomationPreferenceRead",
+    "AutomationPreferenceUpdate",
     "DailyPlanGenerateRequest",
     "DailyPlanResponse",
     "CoachingAdvice",
@@ -75,6 +84,8 @@ __all__ = [
     "DailyTaskUpdate",
     "EnergyLevel",
     "MoodLevel",
+    "NotificationChannel",
+    "StudyPeriod",
     "StudySessionFinish",
     "StudySessionRead",
     "StudySessionStart",
@@ -91,4 +102,5 @@ __all__ = [
     "WeeklyReviewContext",
     "WeeklyReviewGenerateRequest",
     "WeeklyReviewRead",
+    "WorkingDay",
 ]

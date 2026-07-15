@@ -58,3 +58,8 @@ class User(Base):
     weekly_reviews: Mapped[list["WeeklyReview"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    automation_preference: Mapped["AutomationPreference | None"] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )

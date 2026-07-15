@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { ChangeEvent, useEffect, useState } from "react";
+import { api } from "../../lib/api";
+import type { AutomationPreferences, WorkingDay } from "../../lib/api";
 import { getStoredUserId, setStoredUserId } from "../../lib/auth";
 import {
   SETTINGS_KEY,
@@ -12,6 +14,51 @@ import {
 import type { AppSettings as SettingsState } from "../../lib/settings";
 
 type SettingIconName = "user" | "sliders" | "spark" | "link" | "bell" | "shield" | "card" | "upload" | "sun" | "moon" | "monitor" | "calendar";
+
+type EditableAutomationPreferences = Omit<AutomationPreferences, "id" | "user_id" | "created_at" | "updated_at">;
+
+const defaultAutomationPreferences: EditableAutomationPreferences = {
+  timezone: "Asia/Singapore",
+  morning_reminder_time: "08:00",
+  evening_review_time: "21:00",
+  notification_channel: "in_app",
+  automatic_rescheduling_enabled: false,
+  confirmation_required: true,
+  max_reminders_per_day: 3,
+  quiet_hours_start: "22:00",
+  quiet_hours_end: "07:00",
+  working_days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+  preferred_study_periods: [],
+};
+
+const workingDayOptions: { value: WorkingDay; label: string }[] = [
+  { value: "monday", label: "Mon" },
+  { value: "tuesday", label: "Tue" },
+  { value: "wednesday", label: "Wed" },
+  { value: "thursday", label: "Thu" },
+  { value: "friday", label: "Fri" },
+  { value: "saturday", label: "Sat" },
+  { value: "sunday", label: "Sun" },
+];
+
+function editableAutomationPreferences(value: AutomationPreferences): EditableAutomationPreferences {
+  return {
+    timezone: value.timezone,
+    morning_reminder_time: value.morning_reminder_time.slice(0, 5),
+    evening_review_time: value.evening_review_time.slice(0, 5),
+    notification_channel: value.notification_channel,
+    automatic_rescheduling_enabled: value.automatic_rescheduling_enabled,
+    confirmation_required: value.confirmation_required,
+    max_reminders_per_day: value.max_reminders_per_day,
+    quiet_hours_start: value.quiet_hours_start.slice(0, 5),
+    quiet_hours_end: value.quiet_hours_end.slice(0, 5),
+    working_days: value.working_days,
+    preferred_study_periods: value.preferred_study_periods.map((period) => ({
+      start: period.start.slice(0, 5),
+      end: period.end.slice(0, 5),
+    })),
+  };
+}
 
 function SettingIcon({ name, size = 19 }: { name: SettingIconName; size?: number }) {
   const paths: Record<SettingIconName, React.ReactNode> = {
@@ -48,11 +95,20 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [message, setMessage] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const [automation, setAutomation] = useState<EditableAutomationPreferences>(defaultAutomationPreferences);
+  const [savingAutomation, setSavingAutomation] = useState(false);
 
   useEffect(() => {
     setUserId(getStoredUserId());
     setSettings(loadAppSettings());
     setHydrated(true);
+    api.getAutomationPreferences()
+      .then((value) => {
+        const saved = editableAutomationPreferences(value);
+        setAutomation(saved);
+        setSettings((current) => ({ ...current, timezone: saved.timezone }));
+      })
+      .catch((error: Error) => setMessage(`Could not load automation preferences: ${error.message}`));
   }, []);
 
   useEffect(() => {
@@ -68,6 +124,51 @@ export default function SettingsPage() {
   function saveIdentity() {
     setStoredUserId(userId);
     setMessage(`Profile saved. API requests will use user ${userId}.`);
+  }
+
+  function updateAutomation<K extends keyof EditableAutomationPreferences>(
+    key: K,
+    value: EditableAutomationPreferences[K],
+  ) {
+    setAutomation((current) => ({ ...current, [key]: value }));
+  }
+
+  function toggleWorkingDay(day: WorkingDay) {
+    const selected = automation.working_days.includes(day);
+    if (selected && automation.working_days.length === 1) {
+      setMessage("At least one working day is required.");
+      return;
+    }
+    updateAutomation(
+      "working_days",
+      selected
+        ? automation.working_days.filter((value) => value !== day)
+        : [...automation.working_days, day],
+    );
+  }
+
+  function addStudyPeriod() {
+    if (automation.preferred_study_periods.length >= 5) return;
+    updateAutomation("preferred_study_periods", [
+      ...automation.preferred_study_periods,
+      { start: "19:00", end: "21:00" },
+    ]);
+  }
+
+  async function saveAutomationPreferences() {
+    setSavingAutomation(true);
+    try {
+      const saved = await api.updateAutomationPreferences({
+        ...automation,
+        timezone: settings.timezone,
+      });
+      setAutomation(editableAutomationPreferences(saved));
+      setMessage("Automation preferences saved.");
+    } catch (error) {
+      setMessage(`Could not save automation preferences: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setSavingAutomation(false);
+    }
   }
 
   function changeAvatar(event: ChangeEvent<HTMLInputElement>) {
@@ -139,7 +240,25 @@ export default function SettingsPage() {
 
           <section className="settings-card" id="integrations"><h2>Integrations</h2><div className="integration-grid">{[{ name: "Google Calendar", mark: "G", hint: "Sync your schedule and tasks." }, { name: "Notion", mark: "N", hint: "Sync tasks and notes." }, { name: "Telegram", mark: "T", hint: "Get reminders on the go." }, { name: "Gmail", mark: "M", hint: "Email notifications and updates." }].map((item) => { const connected = settings.integrations.includes(item.name); return <article key={item.name}><i>{item.mark}</i><div><strong>{item.name}</strong><span>{item.hint}</span></div><b>›</b><button className={connected ? "connected" : ""} onClick={() => toggleIntegration(item.name)} type="button">{connected ? "Connected" : "Connect"}</button></article>; })}</div></section>
 
-          <section className="settings-card notifications-card" id="notifications"><h2>Notifications</h2><p>Proactive reminders are currently <strong>{settings.proactive ? "enabled" : "disabled"}</strong>. Toggle them in AI Coach settings.</p></section>
+          <section className="settings-card notifications-card" id="notifications">
+            <h2>Automation & Notifications</h2>
+            <p>These saved preferences constrain future reminders and scheduling actions. Step 1 safety rules always take priority.</p>
+            <div className="preference-grid">
+              <label>Morning reminder time<input type="time" value={automation.morning_reminder_time} onChange={(event) => updateAutomation("morning_reminder_time", event.target.value)} /></label>
+              <label>Evening review time<input type="time" value={automation.evening_review_time} onChange={(event) => updateAutomation("evening_review_time", event.target.value)} /></label>
+              <label>Notification channel<select value={automation.notification_channel} onChange={(event) => updateAutomation("notification_channel", event.target.value as EditableAutomationPreferences["notification_channel"])}><option value="in_app">In app</option><option value="email">Email</option><option value="telegram">Telegram</option></select></label>
+              <label>Maximum reminders per day<input min="0" max="20" type="number" value={automation.max_reminders_per_day} onChange={(event) => updateAutomation("max_reminders_per_day", Number(event.target.value))} /></label>
+              <label>Quiet hours start<input type="time" value={automation.quiet_hours_start} onChange={(event) => updateAutomation("quiet_hours_start", event.target.value)} /></label>
+              <label>Quiet hours end<input type="time" value={automation.quiet_hours_end} onChange={(event) => updateAutomation("quiet_hours_end", event.target.value)} /></label>
+              <label className="switch-setting"><span>Automatic rescheduling</span><button aria-pressed={automation.automatic_rescheduling_enabled} className={automation.automatic_rescheduling_enabled ? "on" : ""} onClick={() => updateAutomation("automatic_rescheduling_enabled", !automation.automatic_rescheduling_enabled)} type="button"><i /></button><small>Allows approved rescheduling workflows to run.</small></label>
+              <label className="switch-setting"><span>Extra confirmation preference</span><button aria-pressed={automation.confirmation_required} className={automation.confirmation_required ? "on" : ""} onClick={() => updateAutomation("confirmation_required", !automation.confirmation_required)} type="button"><i /></button><small>Mandatory Step 1 confirmations cannot be disabled.</small></label>
+            </div>
+            <div className="coach-checkboxes">
+              <label>Working days<span>{workingDayOptions.map((day) => <label key={day.value}><input checked={automation.working_days.includes(day.value)} onChange={() => toggleWorkingDay(day.value)} type="checkbox" /> {day.label}</label>)}</span></label>
+              <label>Preferred study periods<span>{automation.preferred_study_periods.length === 0 ? <small>No preferred periods set.</small> : automation.preferred_study_periods.map((period, index) => <span key={`${index}-${period.start}`}><input aria-label={`Study period ${index + 1} start`} type="time" value={period.start} onChange={(event) => updateAutomation("preferred_study_periods", automation.preferred_study_periods.map((item, itemIndex) => itemIndex === index ? { ...item, start: event.target.value } : item))} /><input aria-label={`Study period ${index + 1} end`} type="time" value={period.end} onChange={(event) => updateAutomation("preferred_study_periods", automation.preferred_study_periods.map((item, itemIndex) => itemIndex === index ? { ...item, end: event.target.value } : item))} /><button onClick={() => updateAutomation("preferred_study_periods", automation.preferred_study_periods.filter((_, itemIndex) => itemIndex !== index))} type="button">Remove</button></span>)}<button disabled={automation.preferred_study_periods.length >= 5} onClick={addStudyPeriod} type="button">Add period</button></span></label>
+            </div>
+            <button disabled={savingAutomation} onClick={saveAutomationPreferences} type="button">{savingAutomation ? "Saving..." : "Save automation preferences"}</button>
+          </section>
 
           <section className="settings-card data-settings" id="data"><h2>Data & Export</h2><div><article><span><strong>Export settings</strong><small>Download your preferences and profile.</small></span><button onClick={exportSettings} type="button">Export</button></article><article><span><strong>Import settings</strong><small>Import a previous settings export.</small></span><label>Import<input accept="application/json" onChange={importSettings} type="file" /></label></article><article className="danger"><span><strong>Reset local settings</strong><small>Backend tasks and reviews will remain safe.</small></span><button onClick={clearLocalSettings} type="button">Reset</button></article></div></section>
 
