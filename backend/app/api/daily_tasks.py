@@ -19,7 +19,7 @@ from app.schemas.daily_task import (
     DailyTaskRead,
     DailyTaskUpdate,
 )
-from app.services.planning_service import planning_service
+from app.services.planning_service import MissingActiveWeeklyGoalError, planning_service
 
 
 # This creates a router object。Later, every decorator using this object adds another route.e.g.@router.post(...)
@@ -123,6 +123,11 @@ async def generate_daily_plan(
             available_minutes=payload.available_minutes,
             task_date=payload.task_date,
         )
+    except MissingActiveWeeklyGoalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except httpx.HTTPStatusError as exc:
         try:
             upstream_detail = exc.response.json().get("error", "request rejected")

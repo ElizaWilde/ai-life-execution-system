@@ -5,7 +5,8 @@ import "../styles/globals.css";
  * Link is a React component provided by Next.js for navigation between pages.
  * Link supports optimized client-side navigation and route prefetching. This normally makes navigation faster and avoids reloading the entire webpage.
  */
-import Link from "next/link";
+import Sidebar from "../components/layout/Sidebar";
+import SettingsSync from "../components/layout/SettingsSync";
 /**
  * ReactNode is a TS type that represents any valid React child, including elements, strings, numbers, fragments, portals, and arrays of these types. 
  * React documents ReactNode as the union of the possible types that can be passed as JSX children.
@@ -22,17 +23,6 @@ export const metadata = {
   description: "Weekly planning, daily execution, study timer, and review loop.",
 };
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/check-in", label: "Daily Check-in" },
-  { href: "/weekly-plan", label: "Weekly Plan" },
-  { href: "/today", label: "Today" },
-  { href: "/review", label: "Daily Review" },
-  { href: "/weekly-review", label: "Weekly Review" },
-  { href: "/timer", label: "Timer" },
-  { href: "/login", label: "User" },
-];
-
 /**
  * Create the main Next.js layout component, receive the current page as children, and export this component as the file’s default export.
  * { children }: { children: ReactNode } is a TypeScript type annotation. It means: The component receives an object containing a children property, and children must be content that React can render(渲染).
@@ -41,20 +31,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
+        <SettingsSync />
         <div className="app-shell">
-          <aside className="sidebar">
-            <Link href="/" className="brand">
-              AI Life
-            </Link>
-            <nav>
-              {/* This code creates multiple navigation links from navItems */}
-              {navItems.map((item) => (
-                <Link key={item.href} href={item.href} className="nav-link">
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </aside>
+          <Sidebar />
           {/* Render the current page content inside the <main> area. */}
           <main className="main-content">{children}</main>
         </div>

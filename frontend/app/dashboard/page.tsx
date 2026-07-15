@@ -1,406 +1,252 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import {
-  api,
-  TodayDashboard,
-  WeekDashboard,
-} from "../../lib/api";
+import { api, DailyTask, TodayDashboard, WeekDashboard } from "../../lib/api";
+import { loadAppSettings, orderByWeekStart, useAppSettings } from "../../lib/settings";
 
-const coral = "#ef684f";
-const chartColors = [
-  "#7657e8",
-  "#5279ef",
-  "#c94fe1",
-  "#56bfe0",
-  "#54dca5",
-  "#f54ab5",
-  "#f06461",
-  "#f4b345",
-];
+type IconName =
+  | "calendar"
+  | "chart"
+  | "clock"
+  | "check"
+  | "alert"
+  | "spark"
+  | "brain"
+  | "energy"
+  | "smile"
+  | "moon";
 
-function formatDay(value?: string) {
-  if (!value) return { day: "--", weekday: "Today", month: "" };
-  const date = new Date(`${value}T00:00:00`);
-  return {
-    day: String(date.getDate()).padStart(2, "0"),
-    weekday: date.toLocaleDateString("en", { weekday: "short" }),
-    month: date.toLocaleDateString("en", { month: "long" }),
+function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
+  const paths: Record<IconName, React.ReactNode> = {
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></>,
+    chart: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></>,
+    clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    check: <><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></>,
+    alert: <><path d="M10.3 3.8 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></>,
+    spark: <><path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z"/></>,
+    brain: <><path d="M9.5 4.5A3 3 0 0 0 4 6a3 3 0 0 0 .5 5.5A3 3 0 0 0 6 17a3 3 0 0 0 5.5 1.5V5.2a2.7 2.7 0 0 0-2-2.7ZM14.5 4.5A3 3 0 0 1 20 6a3 3 0 0 1-.5 5.5A3 3 0 0 1 18 17a3 3 0 0 1-5.5 1.5V5.2a2.7 2.7 0 0 1 2-2.7Z"/><path d="M7 9.5h2.5M17 9.5h-2.5"/></>,
+    energy: <path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/>,
+    smile: <><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8 14s1.5 2 4 2 4-2 4-2"/></>,
+    moon: <path d="M20 15.2A8.5 8.5 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z"/>,
   };
+  return <svg aria-hidden="true" className="ui-icon" fill="none" height={size} viewBox="0 0 24 24" width={size}>{paths[name]}</svg>;
 }
 
-function Icon({ children }: { children: React.ReactNode }) {
-  return <span className="dash-icon">{children}</span>;
+function formatDuration(minutes: number) {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function titleCase(value?: string | null) {
+  if (!value) return "Not set";
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function taskTone(task: DailyTask) {
+  if (task.status === "completed") return "done";
+  if (task.status === "in_progress") return "progress";
+  if (task.priority === "high") return "risk";
+  return "planned";
+}
+
+function taskLabel(task: DailyTask) {
+  if (task.status === "completed") return "Done";
+  if (task.status === "in_progress") return "In progress";
+  if (task.priority === "high") return "At risk";
+  return "Planned";
 }
 
 export default function DashboardPage() {
+  const appSettings = useAppSettings();
+  const focusMinutes = Math.max(1, Number(appSettings.focusMinutes) || 25);
+  const focusDurationSeconds = focusMinutes * 60;
   const [today, setToday] = useState<TodayDashboard | null>(null);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState<TodayDashboard | null>(null);
-  const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState("");
+  const [timerSeconds, setTimerSeconds] = useState(() => {
+    const savedMinutes = Number(loadAppSettings().focusMinutes) || 25;
+    return Math.max(1, savedMinutes) * 60;
+  });
+  const [timerRunning, setTimerRunning] = useState(false);
 
   useEffect(() => {
-    async function load() {
-      try {
-        const [todayData, weekData] = await Promise.all([
-          api.getTodayDashboard(),
-          api.getWeekDashboard(),
-        ]);
+    Promise.all([api.getTodayDashboard(), api.getWeekDashboard()])
+      .then(([todayData, weekData]) => {
         setToday(todayData);
         setWeek(weekData);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load dashboard");
-      }
-    }
-    load();
+      })
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : "Failed to load dashboard");
+      });
   }, []);
 
-  const date = formatDay(today?.date);
-  const completion = Math.round((today?.completion_rate ?? 0) * 100);
-  const weekCompletion = Math.round((week?.completion_rate ?? 0) * 100);
-  const circumference = 2 * Math.PI * 48;
-  const chartMax = Math.max(
-    1,
-    ...(week?.daily_focus.map((point) => point.focus_minutes) ?? [1]),
-  );
-  const weeklyBars = week?.daily_focus.length
-    ? week.daily_focus.map((point) => ({
-        label: new Date(`${point.date}T00:00:00`).toLocaleDateString("en", {
-          weekday: "narrow",
-        }),
-        minutes: point.focus_minutes,
-      }))
-    : ["M", "T", "W", "T", "F", "S", "S"].map((label) => ({
-        label,
-        minutes: 0,
-      }));
-  const focusHours = ((week?.focus_minutes ?? 0) / 60).toFixed(1);
-  const allocation = (
-    selectedDate ? selectedDay?.time_allocation : week?.time_allocation
-  ) ?? [];
-  const allocationTotal = allocation.reduce(
-    (sum, point) => sum + (point.planned_minutes || point.focus_minutes),
-    0,
-  );
-  const donutGradient = useMemo(() => {
-    if (!allocationTotal) return "#ebe9e4 0deg 360deg";
-    let cursor = 0;
-    return allocation
-      .slice(0, 8)
-      .map((point, index) => {
-        const value = point.planned_minutes || point.focus_minutes;
-        const start = cursor;
-        cursor += (value / allocationTotal) * 360;
-        return `${chartColors[index % chartColors.length]} ${start}deg ${cursor}deg`;
-      })
-      .join(", ");
-  }, [allocation, allocationTotal]);
-  const comparisonBars = selectedDate
-    ? allocation.slice(0, 7).map((point) => ({
-        label: point.label,
-        planned: point.planned_minutes,
-        focused: point.focus_minutes,
-      }))
-    : (week?.daily_focus ?? []).map((point) => ({
-        label: new Date(`${point.date}T00:00:00`).toLocaleDateString("en", {
-          weekday: "short",
-        }),
-        planned: point.planned_minutes,
-        focused: point.focus_minutes,
-      }));
-  const comparisonMax = Math.max(
-    1,
-    ...comparisonBars.flatMap((point) => [point.planned, point.focused]),
-  );
-  const weekLabel = useMemo(() => {
-    if (!week) return "This week";
-    const start = new Date(`${week.week_start}T00:00:00`);
-    const end = new Date(`${week.week_end}T00:00:00`);
-    return `${start.toLocaleDateString("en", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en", { month: "short", day: "numeric" })}`;
-  }, [week]);
+  useEffect(() => {
+    if (!timerRunning || timerSeconds === 0) return;
+    const interval = window.setInterval(() => {
+      setTimerSeconds((seconds) => {
+        if (seconds <= 1) {
+          setTimerRunning(false);
+          return 0;
+        }
+        return seconds - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [timerRunning, timerSeconds]);
 
-  async function selectChartPeriod(dateValue: string | null) {
-    setSelectedDate(dateValue);
-    if (!dateValue) {
-      setSelectedDay(null);
+  useEffect(() => {
+    setTimerRunning(false);
+    setTimerSeconds(focusDurationSeconds);
+  }, [focusDurationSeconds]);
+
+  const currentDate = useMemo(
+    () => new Date(`${today?.date ?? new Date().toISOString().slice(0, 10)}T00:00:00`),
+    [today?.date],
+  );
+  const todayCompletion = Math.round((today?.completion_rate ?? 0) * 100);
+  const weekCompletion = Math.round((week?.completion_rate ?? 0) * 100);
+  const focusHours = ((week?.focus_minutes ?? 0) / 60).toFixed(1);
+  const atRisk = today?.unfinished_tasks.filter((task) => task.priority === "high").length ?? 0;
+  const focusPoints = orderByWeekStart(week?.daily_focus ?? [], (point) => point.date, appSettings.weekStart);
+  const maxFocus = Math.max(60, ...focusPoints.map((point) => point.focus_minutes));
+  const tasks = today?.unfinished_tasks ?? [];
+  const suggestions = today?.coaching?.suggestions?.slice(0, 3) ?? [];
+  const coachingItems = [
+    { title: "Top priority", body: suggestions[0] ?? (tasks[0] ? `Focus on ${tasks[0].title}.` : "Choose one meaningful win."), icon: "spark" as const },
+    { title: "Deep work", body: suggestions[1] ?? "Protect a focused 60-minute block.", icon: "brain" as const },
+    { title: "Energy check", body: suggestions[2] ?? "Match the workload to your energy.", icon: "energy" as const },
+  ];
+  const timerProgress = timerSeconds / focusDurationSeconds;
+  const timerDisplay = `${String(Math.floor(timerSeconds / 60)).padStart(2, "0")}:${String(timerSeconds % 60).padStart(2, "0")}`;
+  const timerCircumference = 2 * Math.PI * 72;
+  const timerArcLength = timerCircumference * 0.82;
+
+  function resetTimer() {
+    setTimerRunning(false);
+    setTimerSeconds(focusDurationSeconds);
+  }
+
+  function toggleTimer() {
+    if (timerSeconds === 0) {
+      setTimerSeconds(focusDurationSeconds);
+      setTimerRunning(true);
       return;
     }
-    setChartLoading(true);
-    try {
-      setSelectedDay(await api.getDayDashboard(dateValue));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load day statistics");
-    } finally {
-      setChartLoading(false);
-    }
+    setTimerRunning((running) => !running);
   }
 
   return (
-    <section className="dash-page">
-      <header className="dash-topbar">
-        <div className="dash-title-lockup">
-          <span className="dash-mark">mewo</span>
-          <div>
-            <strong>Life Execution</strong>
-            <span>Personal dashboard</span>
-          </div>
+    <section className="life-dashboard">
+      <header className="life-hero">
+        <div className="today-date-card">
+          <span className="hero-icon"><Icon name="calendar" size={30} /></span>
+          <div><strong>Today</strong><span>{currentDate.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}</span></div>
         </div>
-        <div className="dash-top-actions">
-          <span className="dash-period">{weekLabel}</span>
-          <span className="dash-avatar">ME</span>
-          <div className="dash-profile">
-            <strong>MVP User</strong>
-            <span>Building momentum</span>
-          </div>
-        </div>
+        <div className="hero-copy"><h1>Ready for today? <i><Icon name="spark" size={28} /></i></h1><p>Let your AI coach guide the day.</p></div>
+        <Link className="coach-button" href="/check-in"><Icon name="spark" size={18} /> Ask Coach <span>⌄</span></Link>
       </header>
 
-      <div className="dash-hero">
-        <div className="dash-date">
-          <span className="dash-date-number">{date.day}</span>
-          <span>
-            <strong>{date.weekday},</strong>
-            {date.month}
-          </span>
-        </div>
-        <div className="dash-hero-copy">
-          <p>Hey, ready to make today count? <span>✦</span></p>
-          <h1>Keep the important things moving.</h1>
-        </div>
-        <a className="dash-cta" href="/today">
-          Show my tasks <span>→</span>
-        </a>
+      {error ? <div className="error dashboard-error">{error}</div> : null}
+
+      <div className="metric-grid">
+        <article className="metric-card purple"><span className="metric-icon"><Icon name="chart" /></span><div><p>Progress</p><strong>{weekCompletion}%</strong><small><b>↑ {week?.completed_tasks ?? 0}</b> completed this week</small></div></article>
+        <article className="metric-card blue"><span className="metric-icon"><Icon name="clock" /></span><div><p>Focus</p><strong>{focusHours}h</strong><small><b>↑ {formatDuration(today?.focus_minutes ?? 0)}</b> today</small></div></article>
+        <article className="metric-card green"><span className="metric-icon"><Icon name="check" /></span><div><p>Completion</p><strong>{todayCompletion}%</strong><small><b>↑ {today?.completed_tasks ?? 0}</b> of {today?.planned_tasks ?? 0} tasks</small></div></article>
+        <article className="metric-card orange"><span className="metric-icon"><Icon name="alert" /></span><div><p>At-Risk</p><strong>{atRisk}</strong><small><b>→</b> high-priority tasks</small></div></article>
       </div>
 
-      {error ? <div className="error">{error}</div> : null}
-
-      <div className="dash-mosaic">
-        <article className="dash-card dash-focus-card">
-          <div className="dash-card-head">
-            <Icon>◷</Icon>
-            <span className="dash-chip">Today</span>
+      <div className="dashboard-middle-grid">
+        <article className="panel today-panel">
+          <div className="panel-heading"><h2>Today</h2><Link href="/today">View all</Link></div>
+          <div className="today-task-list">
+            {!today ? <p className="panel-empty">Loading today&apos;s plan…</p> : null}
+            {today && tasks.length === 0 ? <p className="panel-empty">Your plan is clear. Add a task to shape the day.</p> : null}
+            {tasks.slice(0, 5).map((task, index) => (
+              <div className="today-task-row" key={task.id}>
+                <span className={`task-check ${task.status === "completed" ? "checked" : ""}`}>{task.status === "completed" ? "✓" : ""}</span>
+                <strong title={task.title}>{task.title}</strong>
+                <span className={`priority-pill ${task.priority}`}>{titleCase(task.priority)}</span>
+                <span className="task-time">{task.estimated_minutes ? formatDuration(task.estimated_minutes) : "Flexible"}</span>
+                <span className={`status-pill ${taskTone(task)}`}>{taskLabel(task)}</span>
+              </div>
+            ))}
           </div>
-          <p className="dash-label">Focus time</p>
-          <p className="dash-big">{today?.focus_minutes ?? 0}<small> min</small></p>
-          <div className="dash-hairline" />
-          <p className="dash-note">Every focused minute is a vote for the life you want.</p>
         </article>
 
-        <article className="dash-card dash-completion-card">
-          <div>
-            <p className="dash-label">Today&apos;s completion</p>
-            <p className="dash-big">{today?.completed_tasks ?? 0}<small> / {today?.planned_tasks ?? 0} tasks</small></p>
-            <span className="dash-trend">↗ {completion}% complete</span>
+        <article className="panel focus-timer-panel">
+          <div className="panel-heading">
+            <h2>Focus Timer</h2>
+            <Link aria-label="Open timer settings" className="timer-settings" href="/timer">⚙</Link>
           </div>
-          <div className="dash-ring" aria-label={`${completion}% complete`}>
-            <svg viewBox="0 0 120 120">
-              <circle className="dash-ring-track" cx="60" cy="60" r="48" />
+          <div className="timer-dial">
+            <svg aria-hidden="true" viewBox="0 0 180 180">
+              <circle className="timer-track" cx="90" cy="90" r="72" />
               <circle
-                className="dash-ring-value"
-                cx="60"
-                cy="60"
-                r="48"
-                strokeDasharray={circumference}
-                strokeDashoffset={circumference * (1 - completion / 100)}
+                className="timer-progress"
+                cx="90"
+                cy="90"
+                r="72"
+                strokeDasharray={`${timerArcLength} ${timerCircumference}`}
+                strokeDashoffset={timerArcLength * (1 - timerProgress)}
               />
             </svg>
-            <strong>{completion}%</strong>
+            <div><strong>{timerDisplay}</strong><span>Focus Time</span></div>
           </div>
-        </article>
-
-        <article className="dash-card dash-week-focus">
-          <div className="dash-card-head">
-            <div>
-              <p className="dash-label">Weekly focus</p>
-              <p className="dash-big">{focusHours}<small> hrs</small></p>
-            </div>
-            <span className="dash-chip">Weekly⌄</span>
-          </div>
-          <div className="dash-mini-bars">
-            {weeklyBars.map((point, index) => (
-              <div className="dash-mini-bar" key={`${point.label}-${index}`}>
-                <span
-                  style={{
-                    height: `${Math.max(8, (point.minutes / chartMax) * 100)}%`,
-                    background:
-                      point.minutes > 0 && point.minutes === chartMax
-                        ? coral
-                        : undefined,
-                  }}
-                />
-                <small>{point.label}</small>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <div className="dash-stats-toolbar">
-          <div>
-            <p className="dash-label">Time intelligence</p>
-            <p className="dash-section-title">
-              {selectedDate
-                ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en", {
-                    weekday: "long",
-                    month: "short",
-                    day: "numeric",
-                  })
-                : "Weekly statistics"}
-            </p>
-          </div>
-          <div className="dash-period-toggle" aria-label="Statistics period">
-            <button
-              className={!selectedDate ? "active" : ""}
-              onClick={() => selectChartPeriod(null)}
-              type="button"
-            >
-              Week
+          <div className="timer-mode"><Icon name="brain" size={15} /> Deep Work <span>⌄</span></div>
+          <div className="timer-actions">
+            <button className="timer-toggle" onClick={toggleTimer} type="button">
+              <span>{timerRunning ? "Ⅱ" : "▶"}</span> {timerRunning ? "Pause" : timerSeconds === 0 ? "Restart" : "Start"}
             </button>
-            {(week?.daily_focus ?? []).map((point) => (
-              <button
-                className={selectedDate === point.date ? "active" : ""}
-                key={point.date}
-                onClick={() => selectChartPeriod(point.date)}
-                type="button"
-              >
-                {new Date(`${point.date}T00:00:00`).toLocaleDateString("en", {
-                  weekday: "short",
-                })}
-              </button>
-            ))}
+            <button aria-label="Reset focus timer" className="timer-reset" onClick={resetTimer} type="button">■</button>
           </div>
-        </div>
+        </article>
 
-        <article className="dash-card dash-allocation-card">
-          <div className="dash-card-head">
-            <div>
-              <p className="dash-label">Where to spend time</p>
-              <p className="dash-section-title">Planned allocation</p>
-            </div>
-            <span className="dash-chip">
-              {allocationTotal} min
-            </span>
+        <article className="panel coach-panel">
+          <div className="panel-heading"><h2>AI Coach</h2><Link href="/check-in">View all</Link></div>
+          <div className="coach-list">
+            {coachingItems.map((item) => <Link className="coach-row" href="/check-in" key={item.title}><span><Icon name={item.icon} /></span><div><strong>{item.title}</strong><p>{item.body}</p></div><b>›</b></Link>)}
           </div>
-          <div className={`dash-donut-layout ${chartLoading ? "is-loading" : ""}`}>
-            <div
-              className="dash-donut"
-              style={{ background: `conic-gradient(${donutGradient})` }}
-              aria-label={`${allocationTotal} planned minutes`}
-            >
-              <div><strong>{allocationTotal}</strong><span>minutes</span></div>
-            </div>
-            <div className="dash-legend">
-              {allocation.slice(0, 8).map((point, index) => (
-                <div key={point.label}>
-                  <i style={{ background: chartColors[index % chartColors.length] }} />
-                  <span title={point.label}>{point.label}</span>
-                  <strong>{point.planned_minutes || point.focus_minutes}m</strong>
-                </div>
-              ))}
-              {!allocation.length ? (
-                <p className="dash-empty">Add estimated time to tasks to see your allocation.</p>
-              ) : null}
+        </article>
+      </div>
+
+      <div className="dashboard-bottom-grid">
+        <article className="panel focus-panel">
+          <div className="panel-heading"><h2>Focus</h2><span className="chart-key"><i /> Focus (h)</span></div>
+          <div className="focus-chart">
+            <div className="chart-scale"><span>6h</span><span>4h</span><span>2h</span><span>0h</span></div>
+            <div className="chart-plot">
+              <div className="goal-line"><span>Goal: 5h</span></div>
+              {(focusPoints.length ? focusPoints : Array.from({ length: 7 }, (_, index) => ({ date: new Date(currentDate.getTime() + index * 86400000).toISOString().slice(0, 10), focus_minutes: 0, planned_minutes: 0 }))).map((point) => {
+                const pointDate = new Date(`${point.date}T00:00:00`);
+                return <div className="focus-column" key={point.date}><span className="bar-value">{(point.focus_minutes / 60).toFixed(1)}h</span><div className="focus-bar" style={{ height: `${Math.max(2, (point.focus_minutes / maxFocus) * 100)}%` }} /><small>{pointDate.toLocaleDateString("en", { weekday: "short" })} {pointDate.getDate()}</small></div>;
+              })}
             </div>
           </div>
         </article>
 
-        <article className="dash-card dash-comparison-card">
-          <div className="dash-card-head">
-            <div>
-              <p className="dash-label">What time to spend</p>
-              <p className="dash-section-title">Plan versus focused</p>
-            </div>
-            <div className="dash-chart-key">
-              <span><i className="planned" /> Planned</span>
-              <span><i className="focused" /> Focused</span>
-            </div>
+        <article className="panel schedule-panel">
+          <div className="panel-heading"><h2>Schedule</h2><Link href="/weekly-plan">View plan</Link></div>
+          <div className="schedule-list">
+            {focusPoints.slice(0, 4).map((point, index) => {
+              const pointDate = new Date(`${point.date}T00:00:00`);
+              return <div className="schedule-row" key={point.date}><time><b>{pointDate.toLocaleDateString("en", { weekday: "short" })}</b><span>{pointDate.toLocaleDateString("en", { month: "short", day: "numeric" })}</span></time><i className={`dot dot-${index}`} /><strong>{point.planned_minutes ? "Planned focus" : "Open capacity"}</strong><span>{formatDuration(point.planned_minutes)} planned</span></div>;
+            })}
+            {!focusPoints.length ? <p className="panel-empty">Weekly schedule will appear here.</p> : null}
           </div>
-          <div className={`dash-grouped-chart ${chartLoading ? "is-loading" : ""}`}>
-            {comparisonBars.map((point, index) => (
-              <div className="dash-bar-group" key={`${point.label}-${index}`}>
-                <div className="dash-bar-pair">
-                  <span
-                    className="planned"
-                    style={{ height: `${Math.max(3, (point.planned / comparisonMax) * 100)}%` }}
-                    title={`Planned ${point.planned} minutes`}
-                  />
-                  <span
-                    className="focused"
-                    style={{ height: `${Math.max(3, (point.focused / comparisonMax) * 100)}%` }}
-                    title={`Focused ${point.focused} minutes`}
-                  />
-                </div>
-                <small title={point.label}>{point.label}</small>
-              </div>
-            ))}
-            {!comparisonBars.length ? (
-              <p className="dash-empty">No time data for this period yet.</p>
-            ) : null}
-          </div>
+          <Link className="panel-more" href="/weekly-plan">+ Open weekly plan</Link>
         </article>
 
-        <article className="dash-card dash-goal-card">
-          <div className="dash-card-head">
-            <div>
-              <p className="dash-label">Goal portfolio</p>
-              <p className="dash-section-title">This week&apos;s direction</p>
-            </div>
-            <Icon>◎</Icon>
+        <article className="panel checkin-panel">
+          <div className="panel-heading"><h2>Check-in</h2><Link href="/check-in">Edit</Link></div>
+          <div className="checkin-list">
+            <div><span className="checkin-icon mood"><Icon name="smile" /></span><label>Mood</label><strong>{titleCase(today?.check_in?.mood_level)}</strong><b>{today?.readiness_score ? `${Math.round(today.readiness_score)}/100` : "—"}</b></div>
+            <div><span className="checkin-icon energy"><Icon name="energy" /></span><label>Energy</label><strong>{titleCase(today?.check_in?.energy_level)}</strong><b>{titleCase(today?.workload_level)}</b></div>
+            <div><span className="checkin-icon sleep"><Icon name="moon" /></span><label>Sleep</label><strong>{today?.check_in ? `${today.check_in.sleep_hours}h` : "Not set"}</strong><b>{today?.check_in && today.check_in.sleep_hours >= 7 ? "Good" : "—"}</b></div>
           </div>
-          <div className="dash-goal-stats">
-            <div>
-              <strong>{week?.active_goals ?? 0}</strong>
-              <span>Active</span>
-            </div>
-            <div>
-              <strong>{week?.completed_goals ?? 0}</strong>
-              <span>Completed</span>
-            </div>
-            <div>
-              <strong>{weekCompletion}%</strong>
-              <span>Task rate</span>
-            </div>
-          </div>
-          <a href="/weekly-plan" className="dash-link">Manage weekly plan <span>↗</span></a>
-        </article>
-
-        <article className="dash-card dash-activity">
-          <div className="dash-card-head">
-            <div>
-              <p className="dash-label">Activity manager</p>
-              <p className="dash-section-title">Unfinished today</p>
-            </div>
-            <span className="dash-chip">{today?.unfinished_tasks.length ?? 0} remaining</span>
-          </div>
-          <div className="dash-task-list">
-            {!today ? <p className="dash-empty">Loading your day…</p> : null}
-            {today?.unfinished_tasks.length === 0 ? (
-              <div className="dash-empty-state">
-                <span>✓</span>
-                <div><strong>Everything is clear.</strong><p>Nice work—protect that calm.</p></div>
-              </div>
-            ) : null}
-            {today?.unfinished_tasks.slice(0, 4).map((task, index) => (
-              <div className="dash-task" key={task.id}>
-                <span className="dash-task-index">{String(index + 1).padStart(2, "0")}</span>
-                <div>
-                  <strong>{task.title}</strong>
-                  <p>{task.estimated_minutes ?? 0} min · {task.priority} priority</p>
-                </div>
-                <span className={`dash-status ${task.status}`}>{task.status.replace("_", " ")}</span>
-              </div>
-            ))}
-          </div>
-          <a href="/today" className="dash-link">Open today&apos;s plan <span>→</span></a>
-        </article>
-
-        <article className="dash-card dash-review-card">
-          <p className="dash-label">Daily reflection</p>
-          <div className="dash-spark">✺</div>
-          <p className="dash-section-title">How did today&apos;s execution feel?</p>
-          <p className="dash-note">Turn today&apos;s data into one useful adjustment for tomorrow.</p>
-          <a href="/review" className="dash-review-button">Write review <span>→</span></a>
+          <div className="coach-note"><Icon name="spark" size={17} /> {today?.coaching?.summary ?? "Check in to get a personalized coaching note."}</div>
         </article>
       </div>
     </section>

@@ -97,6 +97,55 @@ def test_generate_ai_daily_plan(client, user_headers, monkeypatch):
     assert [task["source"] for task in today_tasks.json()] == ["ai", "ai"]
 
 
+def test_generate_ai_daily_plan_requires_active_weekly_goal(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.api.daily_tasks.settings.ollama_api_key", "test-key")
+
+    existing_task = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Unattached unfinished task",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 30,
+            "priority": "medium",
+        },
+    )
+    assert existing_task.status_code == 201
+
+    async def should_not_call_ollama(*args, **kwargs):
+        raise AssertionError("Ollama must not be called without an active weekly goal")
+
+    monkeypatch.setattr(
+        "app.services.planning_service.llm_service.generate_daily_plan",
+        should_not_call_ollama,
+    )
+
+    response = client.post(
+        "/daily-tasks/generate",
+        headers=user_headers,
+        json={
+            "available_minutes": 90,
+            "task_date": date.today().isoformat(),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "No active weekly goal was found for this date. "
+            "Create an active weekly goal before generating an AI plan."
+        )
+    }
+    assert [
+        task["title"]
+        for task in client.get("/daily-tasks/today", headers=user_headers).json()
+    ] == ["Unattached unfinished task"]
+
+
 def test_coaching_condition_reduces_plan_and_prioritizes_important_work(
     client,
     user_headers,
@@ -117,6 +166,19 @@ def test_coaching_condition_reduces_plan_and_prioritizes_important_work(
         },
     )
     assert check_in.status_code == 201
+
+    goal = client.post(
+        "/weekly-goals",
+        headers=user_headers,
+        json={
+            "title": "Complete the critical implementation",
+            "week_start": today.isoformat(),
+            "week_end": today.isoformat(),
+            "priority": "high",
+            "target_minutes": 90,
+        },
+    )
+    assert goal.status_code == 201
 
     async def fake_generate_daily_plan(
         weekly_goals,

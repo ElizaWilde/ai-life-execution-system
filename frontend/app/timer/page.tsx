@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, DailyTask, StudySession } from "../../lib/api";
+import { useAppSettings } from "../../lib/settings";
 
 export default function TimerPage() {
+  const settings = useAppSettings();
+  const targetMinutes = Math.max(1, Number(settings.focusMinutes) || 25);
+  const targetSeconds = targetMinutes * 60;
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState("");
@@ -80,7 +84,8 @@ export default function TimerPage() {
         <div>
           <p className="eyebrow">Timer</p>
           <h1>Study session</h1>
-          <p className="muted">Start a focus session linked to a daily task.</p>
+          <p className="muted">Start a {targetMinutes}-minute focus session linked to a daily task.</p>
+          <p className="muted">Breaks: {settings.shortBreak} min short · {settings.longBreak} min long</p>
         </div>
       </header>
 
@@ -92,6 +97,7 @@ export default function TimerPage() {
           <p className="stat">
             {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
           </p>
+          <p className="muted">Target {targetMinutes}:00 · {Math.min(100, Math.round((elapsedSeconds / targetSeconds) * 100))}% complete</p>
           <div className="form">
             <label className="field">
               <span>Task</span>
@@ -118,7 +124,7 @@ export default function TimerPage() {
           <div className="actions">
             {!running ? (
               <button className="button primary" onClick={startSession}>
-                Start session
+                Start {targetMinutes} min session
               </button>
             ) : (
               <button className="button danger" onClick={finishSession}>
@@ -126,6 +132,7 @@ export default function TimerPage() {
               </button>
             )}
           </div>
+          {running && elapsedSeconds >= targetSeconds ? <p className="success">Focus target reached. Finish when you are ready.</p> : null}
         </div>
 
         <div className="card">

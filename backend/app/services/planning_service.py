@@ -18,6 +18,10 @@ PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 UNFINISHED_STATUSES = {"pending", "in_progress"}
 
 
+class MissingActiveWeeklyGoalError(ValueError):
+    """Raised when daily planning has no active weekly goal for direction."""
+
+
 class PlanningService:
     """Generate and persist AI daily plans from weekly goals and unfinished tasks."""
 
@@ -42,6 +46,12 @@ class PlanningService:
 
         weekly_goals = self._get_active_weekly_goals(db, user_id, plan_date)
         unfinished_tasks = self._get_unfinished_tasks(db, user_id, plan_date)
+
+        if not weekly_goals:
+            raise MissingActiveWeeklyGoalError(
+                "No active weekly goal was found for this date. "
+                "Create an active weekly goal before generating an AI plan."
+            )
 
         generated_items = await llm_service.generate_daily_plan(
             weekly_goals=[self._weekly_goal_to_prompt(goal) for goal in weekly_goals],

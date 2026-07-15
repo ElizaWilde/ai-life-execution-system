@@ -1,51 +1,150 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
+import { ChangeEvent, useEffect, useState } from "react";
 import { getStoredUserId, setStoredUserId } from "../../lib/auth";
+import {
+  SETTINGS_KEY,
+  defaultSettings as defaults,
+  loadAppSettings,
+  saveAppSettings,
+} from "../../lib/settings";
+import type { AppSettings as SettingsState } from "../../lib/settings";
 
-export default function LoginPage() {
+type SettingIconName = "user" | "sliders" | "spark" | "link" | "bell" | "shield" | "card" | "upload" | "sun" | "moon" | "monitor" | "calendar";
+
+function SettingIcon({ name, size = 19 }: { name: SettingIconName; size?: number }) {
+  const paths: Record<SettingIconName, React.ReactNode> = {
+    user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    sliders: <><path d="M4 6h7M15 6h5M4 12h3M11 12h9M4 18h9M17 18h3" /><circle cx="13" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="15" cy="18" r="2" /></>,
+    spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
+    link: <><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2" /><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2" /></>,
+    bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
+    shield: <><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z" /><path d="m9 12 2 2 4-4" /></>,
+    card: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /></>,
+    upload: <><path d="M12 16V4M8 8l4-4 4 4" /><path d="M4 14v6h16v-6" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" /></>,
+    moon: <path d="M20 15.2A8.5 8.5 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z" />,
+    monitor: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
+  };
+  return <svg aria-hidden="true" className="setting-icon" fill="none" height={size} viewBox="0 0 24 24" width={size}>{paths[name]}</svg>;
+}
+
+const settingNav: { id: string; label: string; hint: string; icon: SettingIconName }[] = [
+  { id: "profile", label: "Profile", hint: "Your account and basic info", icon: "user" },
+  { id: "preferences", label: "Preferences", hint: "General app preferences", icon: "sliders" },
+  { id: "ai-coach", label: "AI Coach", hint: "Coach behavior and style", icon: "spark" },
+  { id: "integrations", label: "Integrations", hint: "Connect your tools", icon: "link" },
+  { id: "notifications", label: "Notifications", hint: "Manage alerts and reminders", icon: "bell" },
+  { id: "data", label: "Privacy & Data", hint: "Data, privacy and export", icon: "shield" },
+  { id: "subscription", label: "Subscription", hint: "Manage your plan", icon: "card" },
+];
+
+export default function SettingsPage() {
+  const [settings, setSettings] = useState<SettingsState>(defaults);
   const [userId, setUserId] = useState("1");
-  const [saved, setSaved] = useState(false);
+  const [activeSection, setActiveSection] = useState("profile");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [message, setMessage] = useState("");
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     setUserId(getStoredUserId());
+    setSettings(loadAppSettings());
+    setHydrated(true);
   }, []);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  useEffect(() => {
+    if (!hydrated) return;
+    saveAppSettings(settings);
+  }, [hydrated, settings]);
+
+  function update<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
+    setSettings((current) => ({ ...current, [key]: value }));
+    setMessage("Settings saved locally.");
+  }
+
+  function saveIdentity() {
     setStoredUserId(userId);
-    setSaved(true);
+    setMessage(`Profile saved. API requests will use user ${userId}.`);
+  }
+
+  function changeAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (avatarUrl) URL.revokeObjectURL(avatarUrl);
+    setAvatarUrl(URL.createObjectURL(file));
+    setMessage("Avatar preview updated for this session.");
+  }
+
+  function toggleIntegration(name: string) {
+    update("integrations", settings.integrations.includes(name) ? settings.integrations.filter((item) => item !== name) : [...settings.integrations, name]);
+  }
+
+  function exportSettings() {
+    const payload = JSON.stringify({ userId, settings }, null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "ai-life-settings.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setMessage("Settings export created.");
+  }
+
+  function importSettings(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result)) as { userId?: string; settings?: Partial<SettingsState> };
+        if (parsed.userId) { setUserId(parsed.userId); setStoredUserId(parsed.userId); }
+        if (parsed.settings) setSettings({ ...defaults, ...parsed.settings });
+        setMessage("Settings imported successfully.");
+      } catch {
+        setMessage("That file is not a valid AI Life settings export.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function clearLocalSettings() {
+    if (!window.confirm("Clear locally saved preferences and restore defaults? Backend tasks and reviews will not be deleted.")) return;
+    window.localStorage.removeItem(SETTINGS_KEY);
+    setSettings(defaults);
+    setMessage("Local preferences were reset. Backend data was not deleted.");
+  }
+
+  function scrollTo(id: string) {
+    setActiveSection(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   return (
-    <section className="page">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Temporary auth</p>
-          <h1>User header</h1>
-          <p className="muted">
-            The MVP backend uses <code>X-User-ID</code>. Save the test user id here.
-          </p>
-        </div>
-      </header>
+    <section className="settings-workspace">
+      <header className="settings-header"><div><h1>Settings</h1><p>Customize your experience and AI coach to fit your goals.</p></div><div><Link aria-label="Open calendar" href="/today"><SettingIcon name="calendar" /></Link><Link className="settings-coach-button" href="/check-in"><SettingIcon name="spark" /> Ask my coach <span>⌄</span></Link></div></header>
+      {message ? <div className="settings-message">{message}<button onClick={() => setMessage("")} type="button">×</button></div> : null}
 
-      <div className="card">
-        <form className="form" onSubmit={submit}>
-          <label className="field">
-            <span>User ID</span>
-            <input
-              className="input"
-              min="1"
-              type="number"
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-            />
-          </label>
-          <button className="button primary" type="submit">
-            Save user id
-          </button>
-        </form>
-        {saved ? <p className="success">Saved. Future requests will use X-User-ID: {userId}</p> : null}
+      <div className="settings-layout">
+        <aside className="settings-section-nav">{settingNav.map((item) => <button className={activeSection === item.id ? "active" : ""} key={item.id} onClick={() => scrollTo(item.id)} type="button"><SettingIcon name={item.icon} /><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}</aside>
+
+        <main className="settings-panels">
+          <section className="settings-card profile-settings" id="profile"><h2>Profile</h2><div className="settings-profile-grid"><div className="settings-fields"><label>Name<input value={settings.name} onChange={(event) => update("name", event.target.value)} /></label><label>Email<input type="email" value={settings.email} onChange={(event) => update("email", event.target.value)} /></label></div><div className="settings-fields"><label>Avatar<span className="avatar-control"><i style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}>{avatarUrl ? "" : settings.name.slice(0, 2).toUpperCase()}</i><b><SettingIcon name="upload" size={14} /> Change<input accept="image/*" onChange={changeAvatar} type="file" /></b></span></label><label>Time Zone<select value={settings.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Singapore">(UTC+08:00) Beijing, Shanghai, Singapore</option><option value="Europe/London">(UTC+00:00) London</option><option value="America/New_York">(UTC-05:00) New York</option><option value="America/Los_Angeles">(UTC-08:00) Los Angeles</option></select></label></div></div><div className="api-user-control"><label>API User ID<input min="1" type="number" value={userId} onChange={(event) => setUserId(event.target.value)} /></label><button onClick={saveIdentity} type="button">Save profile</button><span>Used by the MVP’s X-User-ID authentication.</span></div></section>
+
+          <section className="settings-card" id="preferences"><h2>Preferences</h2><div className="preference-grid"><label>Week starts on<select value={settings.weekStart} onChange={(event) => update("weekStart", event.target.value)}><option>Monday</option><option>Sunday</option></select></label><label>Default focus session<select value={settings.focusMinutes} onChange={(event) => update("focusMinutes", event.target.value)}><option value="25">25 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label><label>Short break<select value={settings.shortBreak} onChange={(event) => update("shortBreak", event.target.value)}><option value="5">5 min</option><option value="10">10 min</option></select></label><label>Long break<select value={settings.longBreak} onChange={(event) => update("longBreak", event.target.value)}><option value="15">15 min</option><option value="30">30 min</option></select></label><label className="workload-field">Daily workload<select value={settings.workload} onChange={(event) => update("workload", event.target.value)}><option value="light">Light (1–3h of deep work)</option><option value="medium">Medium (3–6h of deep work)</option><option value="high">High (6–8h of deep work)</option></select></label><div className="theme-field"><span>Theme</span><div>{(["light", "dark", "auto"] as const).map((theme) => <button className={settings.theme === theme ? "active" : ""} key={theme} onClick={() => update("theme", theme)} type="button"><SettingIcon name={theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor"} size={15} /> {theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div></div></section>
+
+          <section className="settings-card" id="ai-coach"><h2>AI Coach</h2><div className="coach-settings-grid"><label>Coaching tone<select value={settings.tone} onChange={(event) => update("tone", event.target.value)}><option value="supportive">Supportive</option><option value="direct">Direct</option><option value="reflective">Reflective</option></select></label><label>Planning strictness<select value={settings.strictness} onChange={(event) => update("strictness", event.target.value)}><option value="flexible">Flexible</option><option value="balanced">Balanced</option><option value="strict">Strict</option></select></label><label>Workload adjustment<select value={settings.adjustment} onChange={(event) => update("adjustment", event.target.value)}><option value="gentle">Gentle</option><option value="moderate">Moderate</option><option value="strong">Strong</option></select></label><label className="switch-setting"><span>Proactive reminders</span><button aria-pressed={settings.proactive} className={settings.proactive ? "on" : ""} onClick={() => update("proactive", !settings.proactive)} type="button"><i /></button><small>AI will proactively remind and suggest.</small></label></div><div className="coach-checkboxes"><label>Focus on what matters most<span><input checked={settings.focusMatters} onChange={(event) => update("focusMatters", event.target.checked)} type="checkbox" /> AI helps me focus on high-impact tasks.</span></label><label>Protect deep work time<span><input checked={settings.protectDeepWork} onChange={(event) => update("protectDeepWork", event.target.checked)} type="checkbox" /> Block interruptions during focus sessions.</span></label><label>Learning from feedback<span><input checked={settings.learnFromFeedback} onChange={(event) => update("learnFromFeedback", event.target.checked)} type="checkbox" /> AI learns from your reviews and check-ins.</span></label></div></section>
+
+          <section className="settings-card" id="integrations"><h2>Integrations</h2><div className="integration-grid">{[{ name: "Google Calendar", mark: "G", hint: "Sync your schedule and tasks." }, { name: "Notion", mark: "N", hint: "Sync tasks and notes." }, { name: "Telegram", mark: "T", hint: "Get reminders on the go." }, { name: "Gmail", mark: "M", hint: "Email notifications and updates." }].map((item) => { const connected = settings.integrations.includes(item.name); return <article key={item.name}><i>{item.mark}</i><div><strong>{item.name}</strong><span>{item.hint}</span></div><b>›</b><button className={connected ? "connected" : ""} onClick={() => toggleIntegration(item.name)} type="button">{connected ? "Connected" : "Connect"}</button></article>; })}</div></section>
+
+          <section className="settings-card notifications-card" id="notifications"><h2>Notifications</h2><p>Proactive reminders are currently <strong>{settings.proactive ? "enabled" : "disabled"}</strong>. Toggle them in AI Coach settings.</p></section>
+
+          <section className="settings-card data-settings" id="data"><h2>Data & Export</h2><div><article><span><strong>Export settings</strong><small>Download your preferences and profile.</small></span><button onClick={exportSettings} type="button">Export</button></article><article><span><strong>Import settings</strong><small>Import a previous settings export.</small></span><label>Import<input accept="application/json" onChange={importSettings} type="file" /></label></article><article className="danger"><span><strong>Reset local settings</strong><small>Backend tasks and reviews will remain safe.</small></span><button onClick={clearLocalSettings} type="button">Reset</button></article></div></section>
+
+          <section className="settings-card subscription-card" id="subscription"><h2>Subscription</h2><p>AI Life MVP workspace</p><span>Local development plan</span></section>
+        </main>
       </div>
     </section>
   );
