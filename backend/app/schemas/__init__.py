@@ -21,6 +21,12 @@ from app.schemas.automation_preference import (
     StudyPeriod,
     WorkingDay,
 )
+from app.schemas.notification import (
+    NotificationRead,
+    NotificationSend,
+    NotificationStatus,
+    NotificationType,
+)
 from app.schemas.daily_check_in import (
     DailyCheckInCreate,
     DailyCheckInRead,
@@ -85,6 +91,10 @@ __all__ = [
     "EnergyLevel",
     "MoodLevel",
     "NotificationChannel",
+    "NotificationRead",
+    "NotificationSend",
+    "NotificationStatus",
+    "NotificationType",
     "StudyPeriod",
     "StudySessionFinish",
     "StudySessionRead",
