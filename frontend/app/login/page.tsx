@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useState } from "react";
 import { api } from "../../lib/api";
-import type { AutomationPreferences, WorkingDay } from "../../lib/api";
-import { getStoredUserId, setStoredUserId } from "../../lib/auth";
+import type { AutomationPreferences, UserAppSettings, WorkingDay } from "../../lib/api";
 import {
   SETTINGS_KEY,
   defaultSettings as defaults,
@@ -21,7 +20,8 @@ const defaultAutomationPreferences: EditableAutomationPreferences = {
   timezone: "Asia/Singapore",
   morning_reminder_time: "08:00",
   evening_review_time: "21:00",
-  notification_channel: "in_app",
+  notification_channel: "email",
+  telegram_chat_id: null,
   automatic_rescheduling_enabled: false,
   confirmation_required: true,
   max_reminders_per_day: 3,
@@ -47,6 +47,7 @@ function editableAutomationPreferences(value: AutomationPreferences): EditableAu
     morning_reminder_time: value.morning_reminder_time.slice(0, 5),
     evening_review_time: value.evening_review_time.slice(0, 5),
     notification_channel: value.notification_channel,
+    telegram_chat_id: value.telegram_chat_id,
     automatic_rescheduling_enabled: value.automatic_rescheduling_enabled,
     confirmation_required: value.confirmation_required,
     max_reminders_per_day: value.max_reminders_per_day,
@@ -57,6 +58,52 @@ function editableAutomationPreferences(value: AutomationPreferences): EditableAu
       start: period.start.slice(0, 5),
       end: period.end.slice(0, 5),
     })),
+  };
+}
+
+function mergeBackendAppSettings(
+  current: SettingsState,
+  saved: UserAppSettings,
+): SettingsState {
+  return {
+    ...current,
+    weekStart: saved.week_start,
+    focusMinutes: String(saved.focus_minutes),
+    shortBreak: String(saved.short_break_minutes),
+    longBreak: String(saved.long_break_minutes),
+    workload: saved.workload,
+    theme: saved.theme,
+    tone: saved.tone,
+    strictness: saved.strictness,
+    adjustment: saved.adjustment,
+    proactive: saved.proactive,
+    focusMatters: saved.focus_matters,
+    protectDeepWork: saved.protect_deep_work,
+    learnFromFeedback: saved.learn_from_feedback,
+    integrations: saved.integrations,
+  };
+}
+
+function backendAppSettingsPayload(
+  value: SettingsState,
+  avatarDataUrl: string,
+): Omit<UserAppSettings, "id" | "user_id" | "created_at" | "updated_at"> {
+  return {
+    week_start: value.weekStart as "Monday" | "Sunday",
+    focus_minutes: Number(value.focusMinutes) as 25 | 45 | 60,
+    short_break_minutes: Number(value.shortBreak) as 5 | 10,
+    long_break_minutes: Number(value.longBreak) as 15 | 30,
+    workload: value.workload as "light" | "medium" | "high",
+    theme: value.theme,
+    tone: value.tone as "supportive" | "direct" | "reflective",
+    strictness: value.strictness as "flexible" | "balanced" | "strict",
+    adjustment: value.adjustment as "gentle" | "moderate" | "strong",
+    proactive: value.proactive,
+    focus_matters: value.focusMatters,
+    protect_deep_work: value.protectDeepWork,
+    learn_from_feedback: value.learnFromFeedback,
+    integrations: value.integrations as UserAppSettings["integrations"],
+    avatar_data_url: avatarDataUrl || null,
   };
 }
 
@@ -90,18 +137,25 @@ const settingNav: { id: string; label: string; hint: string; icon: SettingIconNa
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsState>(defaults);
-  const [userId, setUserId] = useState("1");
   const [activeSection, setActiveSection] = useState("profile");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [message, setMessage] = useState("");
-  const [hydrated, setHydrated] = useState(false);
   const [automation, setAutomation] = useState<EditableAutomationPreferences>(defaultAutomationPreferences);
-  const [savingAutomation, setSavingAutomation] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testingTelegram, setTestingTelegram] = useState(false);
 
   useEffect(() => {
-    setUserId(getStoredUserId());
     setSettings(loadAppSettings());
-    setHydrated(true);
+    api.getCurrentUser()
+      .then((user) => {
+        setSettings((current) => ({
+          ...current,
+          name: user.display_name || "",
+          email: user.email,
+        }));
+      })
+      .catch((error: Error) => setMessage(`Could not load profile: ${error.message}`));
     api.getAutomationPreferences()
       .then((value) => {
         const saved = editableAutomationPreferences(value);
@@ -109,21 +163,51 @@ export default function SettingsPage() {
         setSettings((current) => ({ ...current, timezone: saved.timezone }));
       })
       .catch((error: Error) => setMessage(`Could not load automation preferences: ${error.message}`));
+    api.getAppSettings()
+      .then((saved) => {
+        setSettings((current) => mergeBackendAppSettings(current, saved));
+        setAvatarUrl(saved.avatar_data_url || "");
+      })
+      .catch((error: Error) => setMessage(`Could not load app settings: ${error.message}`));
   }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    saveAppSettings(settings);
-  }, [hydrated, settings]);
 
   function update<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
-    setMessage("Settings saved locally.");
+    setMessage("You have unsaved settings changes.");
   }
 
-  function saveIdentity() {
-    setStoredUserId(userId);
-    setMessage(`Profile saved. API requests will use user ${userId}.`);
+  async function saveAllSettings() {
+    setSavingAll(true);
+    try {
+      const [user, savedAutomation, savedAppSettings] = await Promise.all([
+        api.updateCurrentUser({
+          display_name: settings.name.trim(),
+          email: settings.email.trim(),
+        }),
+        api.updateAutomationPreferences({
+          ...automation,
+          timezone: settings.timezone,
+        }),
+        api.updateAppSettings(backendAppSettingsPayload(settings, avatarUrl)),
+      ]);
+      const synchronized = mergeBackendAppSettings(
+        {
+          ...settings,
+          name: user.display_name || "",
+          email: user.email,
+          timezone: savedAutomation.timezone,
+        },
+        savedAppSettings,
+      );
+      setSettings(synchronized);
+      setAutomation(editableAutomationPreferences(savedAutomation));
+      saveAppSettings(synchronized);
+      setMessage("All settings were saved to the frontend and backend.");
+    } catch (error) {
+      setMessage(`Could not save all settings: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setSavingAll(false);
+    }
   }
 
   function updateAutomation<K extends keyof EditableAutomationPreferences>(
@@ -131,6 +215,7 @@ export default function SettingsPage() {
     value: EditableAutomationPreferences[K],
   ) {
     setAutomation((current) => ({ ...current, [key]: value }));
+    setMessage("You have unsaved settings changes.");
   }
 
   function toggleWorkingDay(day: WorkingDay) {
@@ -155,36 +240,63 @@ export default function SettingsPage() {
     ]);
   }
 
-  async function saveAutomationPreferences() {
-    setSavingAutomation(true);
-    try {
-      const saved = await api.updateAutomationPreferences({
-        ...automation,
-        timezone: settings.timezone,
-      });
-      setAutomation(editableAutomationPreferences(saved));
-      setMessage("Automation preferences saved.");
-    } catch (error) {
-      setMessage(`Could not save automation preferences: ${error instanceof Error ? error.message : "Unknown error"}`);
-    } finally {
-      setSavingAutomation(false);
-    }
-  }
-
   function changeAvatar(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (avatarUrl) URL.revokeObjectURL(avatarUrl);
-    setAvatarUrl(URL.createObjectURL(file));
-    setMessage("Avatar preview updated for this session.");
+    if (file.size > 1_500_000) {
+      setMessage("Avatar must be smaller than 1.5 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAvatarUrl(String(reader.result));
+      setMessage("You have unsaved settings changes.");
+    };
+    reader.readAsDataURL(file);
   }
 
   function toggleIntegration(name: string) {
     update("integrations", settings.integrations.includes(name) ? settings.integrations.filter((item) => item !== name) : [...settings.integrations, name]);
   }
 
+  async function testEmailNotification() {
+    setTestingEmail(true);
+    try {
+      const delivery = await api.sendTestEmail();
+      if (delivery.status === "delivered") {
+        setMessage(`Test email delivered to ${delivery.recipient}.`);
+      } else if (delivery.status === "failed") {
+        setMessage(`Test email failed: ${delivery.failure_reason || "Unknown SMTP error"}`);
+      } else {
+        setMessage(`Test email is ${delivery.status}.`);
+      }
+    } catch (error) {
+      setMessage(`Could not test email: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setTestingEmail(false);
+    }
+  }
+
+  async function testTelegramNotification() {
+    setTestingTelegram(true);
+    try {
+      const delivery = await api.sendTestTelegram();
+      if (delivery.status === "delivered") {
+        setMessage("Test Telegram message delivered.");
+      } else if (delivery.status === "failed") {
+        setMessage(`Test Telegram failed: ${delivery.failure_reason || "Unknown Telegram error"}`);
+      } else {
+        setMessage(`Test Telegram message is ${delivery.status}.`);
+      }
+    } catch (error) {
+      setMessage(`Could not test Telegram: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setTestingTelegram(false);
+    }
+  }
+
   function exportSettings() {
-    const payload = JSON.stringify({ userId, settings }, null, 2);
+    const payload = JSON.stringify({ settings, avatarDataUrl: avatarUrl || null }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -200,9 +312,9 @@ export default function SettingsPage() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result)) as { userId?: string; settings?: Partial<SettingsState> };
-        if (parsed.userId) { setUserId(parsed.userId); setStoredUserId(parsed.userId); }
+        const parsed = JSON.parse(String(reader.result)) as { settings?: Partial<SettingsState>; avatarDataUrl?: string | null };
         if (parsed.settings) setSettings({ ...defaults, ...parsed.settings });
+        if (parsed.avatarDataUrl !== undefined) setAvatarUrl(parsed.avatarDataUrl || "");
         setMessage("Settings imported successfully.");
       } catch {
         setMessage("That file is not a valid AI Life settings export.");
@@ -215,6 +327,7 @@ export default function SettingsPage() {
     if (!window.confirm("Clear locally saved preferences and restore defaults? Backend tasks and reviews will not be deleted.")) return;
     window.localStorage.removeItem(SETTINGS_KEY);
     setSettings(defaults);
+    setAvatarUrl("");
     setMessage("Local preferences were reset. Backend data was not deleted.");
   }
 
@@ -229,16 +342,16 @@ export default function SettingsPage() {
       {message ? <div className="settings-message">{message}<button onClick={() => setMessage("")} type="button">×</button></div> : null}
 
       <div className="settings-layout">
-        <aside className="settings-section-nav">{settingNav.map((item) => <button className={activeSection === item.id ? "active" : ""} key={item.id} onClick={() => scrollTo(item.id)} type="button"><SettingIcon name={item.icon} /><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}</aside>
+        <aside className="settings-section-nav">{settingNav.map((item) => <button className={activeSection === item.id ? "active" : ""} key={item.id} onClick={() => scrollTo(item.id)} type="button"><SettingIcon name={item.icon} /><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}<div className="settings-nav-save"><button disabled={savingAll} onClick={saveAllSettings} type="button">{savingAll ? "Saving..." : "Save profile"}</button><small>Saves all settings</small></div></aside>
 
         <main className="settings-panels">
-          <section className="settings-card profile-settings" id="profile"><h2>Profile</h2><div className="settings-profile-grid"><div className="settings-fields"><label>Name<input value={settings.name} onChange={(event) => update("name", event.target.value)} /></label><label>Email<input type="email" value={settings.email} onChange={(event) => update("email", event.target.value)} /></label></div><div className="settings-fields"><label>Avatar<span className="avatar-control"><i style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}>{avatarUrl ? "" : settings.name.slice(0, 2).toUpperCase()}</i><b><SettingIcon name="upload" size={14} /> Change<input accept="image/*" onChange={changeAvatar} type="file" /></b></span></label><label>Time Zone<select value={settings.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Singapore">(UTC+08:00) Beijing, Shanghai, Singapore</option><option value="Europe/London">(UTC+00:00) London</option><option value="America/New_York">(UTC-05:00) New York</option><option value="America/Los_Angeles">(UTC-08:00) Los Angeles</option></select></label></div></div><div className="api-user-control"><label>API User ID<input min="1" type="number" value={userId} onChange={(event) => setUserId(event.target.value)} /></label><button onClick={saveIdentity} type="button">Save profile</button><span>Used by the MVP’s X-User-ID authentication.</span></div></section>
+          <section className="settings-card profile-settings" id="profile"><h2>Profile</h2><div className="settings-profile-grid"><div className="settings-fields"><label>Name<input value={settings.name} onChange={(event) => update("name", event.target.value)} /></label><label>Email<input type="email" value={settings.email} onChange={(event) => update("email", event.target.value)} /></label><label>Telegram chat ID<input inputMode="numeric" placeholder="Example: 123456789" value={automation.telegram_chat_id || ""} onChange={(event) => updateAutomation("telegram_chat_id", event.target.value || null)} /></label></div><div className="settings-fields"><label>Avatar<span className="avatar-control"><i style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}>{avatarUrl ? "" : settings.name.slice(0, 2).toUpperCase()}</i><b><SettingIcon name="upload" size={14} /> Change<input accept="image/*" onChange={changeAvatar} type="file" /></b></span></label><label>Time Zone<select value={settings.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Singapore">(UTC+08:00) Beijing, Shanghai, Singapore</option><option value="Europe/London">(UTC+00:00) London</option><option value="America/New_York">(UTC-05:00) New York</option><option value="America/Los_Angeles">(UTC-08:00) Los Angeles</option></select></label></div></div></section>
 
           <section className="settings-card" id="preferences"><h2>Preferences</h2><div className="preference-grid"><label>Week starts on<select value={settings.weekStart} onChange={(event) => update("weekStart", event.target.value)}><option>Monday</option><option>Sunday</option></select></label><label>Default focus session<select value={settings.focusMinutes} onChange={(event) => update("focusMinutes", event.target.value)}><option value="25">25 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label><label>Short break<select value={settings.shortBreak} onChange={(event) => update("shortBreak", event.target.value)}><option value="5">5 min</option><option value="10">10 min</option></select></label><label>Long break<select value={settings.longBreak} onChange={(event) => update("longBreak", event.target.value)}><option value="15">15 min</option><option value="30">30 min</option></select></label><label className="workload-field">Daily workload<select value={settings.workload} onChange={(event) => update("workload", event.target.value)}><option value="light">Light (1–3h of deep work)</option><option value="medium">Medium (3–6h of deep work)</option><option value="high">High (6–8h of deep work)</option></select></label><div className="theme-field"><span>Theme</span><div>{(["light", "dark", "auto"] as const).map((theme) => <button className={settings.theme === theme ? "active" : ""} key={theme} onClick={() => update("theme", theme)} type="button"><SettingIcon name={theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor"} size={15} /> {theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div></div></section>
 
           <section className="settings-card" id="ai-coach"><h2>AI Coach</h2><div className="coach-settings-grid"><label>Coaching tone<select value={settings.tone} onChange={(event) => update("tone", event.target.value)}><option value="supportive">Supportive</option><option value="direct">Direct</option><option value="reflective">Reflective</option></select></label><label>Planning strictness<select value={settings.strictness} onChange={(event) => update("strictness", event.target.value)}><option value="flexible">Flexible</option><option value="balanced">Balanced</option><option value="strict">Strict</option></select></label><label>Workload adjustment<select value={settings.adjustment} onChange={(event) => update("adjustment", event.target.value)}><option value="gentle">Gentle</option><option value="moderate">Moderate</option><option value="strong">Strong</option></select></label><label className="switch-setting"><span>Proactive reminders</span><button aria-pressed={settings.proactive} className={settings.proactive ? "on" : ""} onClick={() => update("proactive", !settings.proactive)} type="button"><i /></button><small>AI will proactively remind and suggest.</small></label></div><div className="coach-checkboxes"><label>Focus on what matters most<span><input checked={settings.focusMatters} onChange={(event) => update("focusMatters", event.target.checked)} type="checkbox" /> AI helps me focus on high-impact tasks.</span></label><label>Protect deep work time<span><input checked={settings.protectDeepWork} onChange={(event) => update("protectDeepWork", event.target.checked)} type="checkbox" /> Block interruptions during focus sessions.</span></label><label>Learning from feedback<span><input checked={settings.learnFromFeedback} onChange={(event) => update("learnFromFeedback", event.target.checked)} type="checkbox" /> AI learns from your reviews and check-ins.</span></label></div></section>
 
-          <section className="settings-card" id="integrations"><h2>Integrations</h2><div className="integration-grid">{[{ name: "Google Calendar", mark: "G", hint: "Sync your schedule and tasks." }, { name: "Notion", mark: "N", hint: "Sync tasks and notes." }, { name: "Telegram", mark: "T", hint: "Get reminders on the go." }, { name: "Gmail", mark: "M", hint: "Email notifications and updates." }].map((item) => { const connected = settings.integrations.includes(item.name); return <article key={item.name}><i>{item.mark}</i><div><strong>{item.name}</strong><span>{item.hint}</span></div><b>›</b><button className={connected ? "connected" : ""} onClick={() => toggleIntegration(item.name)} type="button">{connected ? "Connected" : "Connect"}</button></article>; })}</div></section>
+          <section className="settings-card" id="integrations"><h2>Integrations</h2><div className="integration-grid">{[{ name: "Google Calendar", mark: "G", hint: "Sync your schedule and tasks." }, { name: "Notion", mark: "N", hint: "Sync tasks and notes." }, { name: "Telegram", mark: "T", hint: "Test delivery using your saved chat ID." }, { name: "Gmail", mark: "M", hint: "Test delivery to your saved profile email." }].map((item) => { const connected = settings.integrations.includes(item.name); return <article key={item.name}><i>{item.mark}</i><div><strong>{item.name}</strong><span>{item.hint}</span></div><b>›</b><span className="integration-actions"><button className={connected ? "connected" : ""} onClick={() => toggleIntegration(item.name)} type="button">{connected ? "Connected" : "Connect"}</button>{item.name === "Gmail" ? <button disabled={testingEmail} onClick={testEmailNotification} type="button">{testingEmail ? "Testing..." : "Test email"}</button> : null}{item.name === "Telegram" ? <button disabled={testingTelegram} onClick={testTelegramNotification} type="button">{testingTelegram ? "Testing..." : "Test Telegram"}</button> : null}</span></article>; })}</div></section>
 
           <section className="settings-card notifications-card" id="notifications">
             <h2>Automation & Notifications</h2>
@@ -246,7 +359,7 @@ export default function SettingsPage() {
             <div className="preference-grid">
               <label>Morning reminder time<input type="time" value={automation.morning_reminder_time} onChange={(event) => updateAutomation("morning_reminder_time", event.target.value)} /></label>
               <label>Evening review time<input type="time" value={automation.evening_review_time} onChange={(event) => updateAutomation("evening_review_time", event.target.value)} /></label>
-              <label>Notification channel<select value={automation.notification_channel} onChange={(event) => updateAutomation("notification_channel", event.target.value as EditableAutomationPreferences["notification_channel"])}><option value="in_app">In app</option><option value="email">Email</option><option value="telegram">Telegram</option></select></label>
+              <label>Notification channel<select value={automation.notification_channel} onChange={(event) => updateAutomation("notification_channel", event.target.value as EditableAutomationPreferences["notification_channel"])}><option value="email">Email</option><option value="telegram">Telegram</option><option disabled value="in_app">In app (coming later)</option></select></label>
               <label>Maximum reminders per day<input min="0" max="20" type="number" value={automation.max_reminders_per_day} onChange={(event) => updateAutomation("max_reminders_per_day", Number(event.target.value))} /></label>
               <label>Quiet hours start<input type="time" value={automation.quiet_hours_start} onChange={(event) => updateAutomation("quiet_hours_start", event.target.value)} /></label>
               <label>Quiet hours end<input type="time" value={automation.quiet_hours_end} onChange={(event) => updateAutomation("quiet_hours_end", event.target.value)} /></label>
@@ -257,7 +370,6 @@ export default function SettingsPage() {
               <label>Working days<span>{workingDayOptions.map((day) => <label key={day.value}><input checked={automation.working_days.includes(day.value)} onChange={() => toggleWorkingDay(day.value)} type="checkbox" /> {day.label}</label>)}</span></label>
               <label>Preferred study periods<span>{automation.preferred_study_periods.length === 0 ? <small>No preferred periods set.</small> : automation.preferred_study_periods.map((period, index) => <span key={`${index}-${period.start}`}><input aria-label={`Study period ${index + 1} start`} type="time" value={period.start} onChange={(event) => updateAutomation("preferred_study_periods", automation.preferred_study_periods.map((item, itemIndex) => itemIndex === index ? { ...item, start: event.target.value } : item))} /><input aria-label={`Study period ${index + 1} end`} type="time" value={period.end} onChange={(event) => updateAutomation("preferred_study_periods", automation.preferred_study_periods.map((item, itemIndex) => itemIndex === index ? { ...item, end: event.target.value } : item))} /><button onClick={() => updateAutomation("preferred_study_periods", automation.preferred_study_periods.filter((_, itemIndex) => itemIndex !== index))} type="button">Remove</button></span>)}<button disabled={automation.preferred_study_periods.length >= 5} onClick={addStudyPeriod} type="button">Add period</button></span></label>
             </div>
-            <button disabled={savingAutomation} onClick={saveAutomationPreferences} type="button">{savingAutomation ? "Saving..." : "Save automation preferences"}</button>
           </section>
 
           <section className="settings-card data-settings" id="data"><h2>Data & Export</h2><div><article><span><strong>Export settings</strong><small>Download your preferences and profile.</small></span><button onClick={exportSettings} type="button">Export</button></article><article><span><strong>Import settings</strong><small>Import a previous settings export.</small></span><label>Import<input accept="application/json" onChange={importSettings} type="file" /></label></article><article className="danger"><span><strong>Reset local settings</strong><small>Backend tasks and reviews will remain safe.</small></span><button onClick={clearLocalSettings} type="button">Reset</button></article></div></section>

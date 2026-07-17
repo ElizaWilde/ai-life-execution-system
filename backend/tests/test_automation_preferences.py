@@ -10,7 +10,8 @@ def test_get_creates_safe_default_preferences(client, user_headers):
     assert data["timezone"] == "Asia/Singapore"
     assert data["morning_reminder_time"] == "08:00:00"
     assert data["evening_review_time"] == "21:00:00"
-    assert data["notification_channel"] == "in_app"
+    assert data["notification_channel"] == "email"
+    assert data["telegram_chat_id"] is None
     assert data["automatic_rescheduling_enabled"] is False
     assert data["confirmation_required"] is True
     assert data["max_reminders_per_day"] == 3
@@ -29,6 +30,7 @@ def test_patch_persists_all_automation_constraints(client, user_headers):
         "morning_reminder_time": "07:30",
         "evening_review_time": "20:45",
         "notification_channel": "telegram",
+        "telegram_chat_id": "-1001234567890",
         "automatic_rescheduling_enabled": True,
         "confirmation_required": False,
         "max_reminders_per_day": 5,
@@ -53,6 +55,7 @@ def test_patch_persists_all_automation_constraints(client, user_headers):
     data = fetched.json()
     assert data["timezone"] == "Europe/London"
     assert data["notification_channel"] == "telegram"
+    assert data["telegram_chat_id"] == "-1001234567890"
     assert data["automatic_rescheduling_enabled"] is True
     assert data["confirmation_required"] is False
     assert data["working_days"] == ["monday", "wednesday", "saturday"]

@@ -1,142 +1,431 @@
 # Phase 3 — Intelligent Automation
 
-Phase 3 turns the system from a passive coaching application into a proactive assistant. Its main functions are reminders, automatic rescheduling, procrastination detection, completion forecasting, and natural-language commands. 
+## 1. What Phase 3 is trying to achieve
 
-## Step 1 — Define automation rules
+In Phase 1, the system records plans and study activity.
 
-Before adding schedulers or agents, decide what the system may do automatically.
+In Phase 2, the system analyzes the user's condition and provides recommendations.
 
-Separate actions into three levels:
+In Phase 3, the system should begin acting **proactively**.
 
-1. **Safe automatic actions**
+This means the system should not wait for the user to open the application and ask:
 
-   * Send reminders
-   * Generate forecasts
-   * Detect overdue tasks
-   * Suggest schedule changes
+> What should I do?
 
-2. **Actions requiring confirmation**
+Instead, it should automatically notice situations such as:
 
-   * Move tasks to another day
-   * Change task duration
-   * Reduce a weekly goal
-   * Update Notion tasks
+* A task is about to start.
+* A deadline is approaching.
+* A task has been postponed several times.
+* The weekly goal is becoming difficult to complete.
+* Today's workload is unrealistic.
+* The user has ignored several reminders.
 
-3. **Actions that should never happen silently**
+The system can then:
 
-   * Delete tasks
-   * Cancel goals
-   * Modify important deadlines
-   * Replace user-created plans
+* Send a reminder.
+* Update a forecast.
+* Detect a risk.
+* Suggest a schedule change.
+* Ask the user to approve an action.
 
-This prevents the automation system from making unexpected changes.
+The purpose of Phase 3 is therefore:
 
----
+```text
+Observe the plan
+→ detect problems
+→ propose an appropriate response
+→ safely apply approved changes
+```
 
-## Step 2 — Add user automation preferences
-
-Allow each user to configure:
-
-* Time zone
-* Morning reminder time
-* Evening review time
-* Preferred notification channel
-* Whether automatic rescheduling is enabled
-* Whether confirmation is required
-* Maximum number of reminders per day
-* Quiet hours
-* Working days
-* Preferred study periods
-
-These settings become the constraints for every scheduled action.
+Phase 3 should make the application proactive, but not fully autonomous.
 
 ---
 
-## Step 3 — Create the notification system
+# 2. The complete Phase 3 workflow
 
-Build one notification interface that supports different channels.
+The final workflow should look like this:
 
-Start with one channel, such as Telegram or email. Do not implement several channels at the same time.
+```text
+User creates a weekly and daily plan
+            ↓
+Scheduler checks the system periodically
+            ↓
+System detects reminders, overdue tasks, or risks
+            ↓
+Rules determine whether action is needed
+            ↓
+System sends a notification or creates a proposal
+            ↓
+User confirms important changes
+            ↓
+Backend applies the approved action
+            ↓
+System records the result
+            ↓
+Forecast and plan are recalculated
+```
 
-The notification system should support:
-
-* Morning-plan notification
-* Upcoming-task reminder
-* Missed-task reminder
-* Deadline warning
-* Evening check-in reminder
-* Weekly-review notification
-* Rescheduling proposal
-
-Every delivery should record:
-
-* User
-* Notification type
-* Message
-* Scheduled time
-* Actual delivery time
-* Delivery status
-* Failure reason
-
-This allows failed notifications to be inspected and retried.
+Every Phase 3 step exists to support part of this workflow.
 
 ---
 
-## Step 4 — Introduce a background scheduler
+# 3. Step 1 — Define automation permissions
 
-The scheduler runs tasks without waiting for an API request.
+## What to build
 
-For the current project, APScheduler is sufficient for Phase 3.
+Classify automation actions into three permission levels.
 
-It should periodically run jobs such as:
+### Safe automatic actions
 
-* Check for reminders that are due
-* Find overdue tasks
-* Detect procrastination signals
-* Recalculate completion forecasts
-* Generate rescheduling proposals
-* Send morning and evening notifications
+The system may perform these actions without confirmation:
 
-Run the scheduler as a separate Docker service rather than inside every FastAPI process. Otherwise, multiple API workers may execute the same job several times.
+* Send reminders.
+* Detect overdue tasks.
+* Calculate forecasts.
+* Detect possible procrastination.
+* Generate suggestions.
+
+### Actions requiring confirmation
+
+The system must ask the user before:
+
+* Moving a task.
+* Changing task duration.
+* Reducing a weekly goal.
+* Updating tasks in Notion.
+* Applying a rescheduling proposal.
+
+### Actions that must never happen silently
+
+The system must not silently:
+
+* Delete tasks.
+* Cancel goals.
+* Change important deadlines.
+* Replace a user-created plan.
+
+## Why this step is necessary
+
+Before creating automation, the system needs clear boundaries.
+
+Without permission rules, an AI-generated decision could directly change important user data.
+
+For example:
+
+```text
+System detects that the user is behind
+→ AI decides to delete two tasks
+→ database is updated automatically
+```
+
+This is unsafe because the user did not approve the change.
+
+The correct design is:
+
+```text
+System detects that the user is behind
+→ system generates a proposal
+→ user reviews it
+→ user approves it
+→ backend applies it
+```
+
+## Output of this step
+
+Create enums or constants such as:
+
+```python
+class AutomationLevel(str, Enum):
+    SAFE_AUTOMATIC = "safe_automatic"
+    REQUIRES_CONFIRMATION = "requires_confirmation"
+    NEVER_SILENT = "never_silent"
+```
+
+This permission system will later be used by reminders, commands, rescheduling, and the coordinator.
 
 ---
 
-## Step 5 — Implement scheduled reminders
+# 4. Step 2 — Add user automation preferences
 
-Add reminder creation and management.
+## What to build
 
-A reminder should contain:
+Store automation settings for each user:
 
-* Reminder type
-* Target task or plan
-* Scheduled execution time
-* User time zone
-* Delivery channel
-* Enabled or disabled state
-* Recurrence rule
-* Last execution time
-* Next execution time
+* Time zone.
+* Morning notification time.
+* Evening review time.
+* Quiet hours.
+* Working days.
+* Preferred study periods.
+* Notification channel.
+* Maximum reminders per day.
+* Automatic rescheduling enabled or disabled.
+* Confirmation requirements.
 
-The reminder process should be:
+## Why this step is necessary
+
+Automation cannot behave correctly without knowing the user's preferences.
+
+For example, a reminder scheduled for `08:00` is incomplete information.
+
+The system also needs to know:
+
+```text
+08:00 in which time zone?
+Should reminders be sent during weekends?
+Is 08:00 inside quiet hours?
+Which notification channel should be used?
+```
+
+Without these settings, the scheduler may send messages at the wrong time or perform actions the user does not want.
+
+## Output of this step
+
+Create a model such as:
+
+```text
+UserAutomationPreference
+```
+
+It becomes the source of constraints for all automated jobs.
+
+---
+
+# 5. Step 3 — Build the notification system
+
+## What to build
+
+Create one notification service that can send messages through one provider.
+
+For the first version, use only one channel:
+
+* Telegram, or
+* Email.
+
+Do not implement several providers at the beginning.
+
+The service should support:
+
+* Morning-plan notification.
+* Upcoming-task reminder.
+* Overdue-task warning.
+* Deadline warning.
+* Evening check-in.
+* Weekly-review notification.
+* Rescheduling proposal.
+
+Every notification delivery should record:
+
+* User.
+* Notification type.
+* Message.
+* Scheduled time.
+* Delivery time.
+* Delivery status.
+* Failure reason.
+
+## Why this step is necessary
+
+Detection alone does not help the user.
+
+For example:
+
+```text
+System detects that a task is overdue
+```
+
+Nothing changes unless the user is informed.
+
+The notification service is the communication layer between the automation system and the user.
+
+It also separates business logic from delivery logic.
+
+```text
+Reminder service decides what message is needed
+Notification service decides how to send it
+```
+
+## Output of this step
+
+Create:
+
+```text
+notification_service.py
+notification_delivery model
+notification provider adapter
+```
+
+---
+
+# 6. Step 4 — Add a background scheduler
+
+## What to build
+
+Use APScheduler to run jobs automatically.
+
+The scheduler should run jobs such as:
+
+* Check due reminders.
+* Detect overdue tasks.
+* Recalculate forecasts.
+* Detect procrastination signals.
+* Generate rescheduling proposals.
+* Send morning notifications.
+* Send evening notifications.
+
+Run the scheduler as a separate Docker service.
+
+## Why this step is necessary
+
+FastAPI normally runs code only when an API request arrives.
+
+Without a scheduler:
+
+```text
+User does not open the application
+→ no API request is made
+→ no reminder check runs
+→ no notification is sent
+```
+
+With a scheduler:
+
+```text
+08:00 arrives
+→ scheduler starts morning notification job
+→ job loads today's plan
+→ notification is sent
+```
+
+The scheduler gives the system the ability to act without waiting for the user.
+
+## Why it should be a separate Docker service
+
+Suppose FastAPI runs with four workers:
+
+```bash
+uvicorn app.main:app --workers 4
+```
+
+If APScheduler starts inside FastAPI, every worker may start its own scheduler.
+
+The same job could then run four times:
+
+```text
+Worker 1 sends reminder
+Worker 2 sends reminder
+Worker 3 sends reminder
+Worker 4 sends reminder
+```
+
+Instead, use:
+
+```text
+api service       → handles HTTP requests
+scheduler service → runs scheduled jobs
+database          → stores shared data
+```
+
+Example:
+
+```yaml
+services:
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  scheduler:
+    build: .
+    command: python -m app.scheduler_main
+
+  postgres:
+    image: postgres:16
+```
+
+## Output of this step
+
+Create:
+
+```text
+app/scheduler_main.py
+app/scheduler/scheduler.py
+app/scheduler/jobs/
+```
+
+---
+
+# 7. Step 5 — Implement reminders
+
+## What to build
+
+Create reminder records with fields such as:
+
+* Reminder type.
+* Related task.
+* Scheduled time.
+* User time zone.
+* Delivery channel.
+* Enabled state.
+* Recurrence rule.
+* Last execution time.
+* Next execution time.
+
+The execution process should be:
 
 ```text
 Scheduler finds due reminder
-→ validate reminder is still relevant
+→ check whether reminder is still relevant
 → generate message
 → send notification
-→ record delivery result
+→ record result
 → calculate next execution time
 ```
 
-A task reminder should not be sent when the task is already completed, cancelled, or moved.
+## Why this step is necessary
+
+The scheduler only decides **when a function should run**.
+
+It does not know:
+
+* Which reminder belongs to which user.
+* Which task is related.
+* Whether the task is already completed.
+* Whether the reminder repeats.
+* Whether the notification was already sent.
+
+The reminder model stores this information.
+
+## Important rule
+
+Before sending a reminder, check the current task state.
+
+Do not send the reminder when the task is:
+
+```text
+completed
+cancelled
+moved to another time
+```
+
+## Output of this step
+
+Create:
+
+```text
+Reminder model
+Reminder service
+Reminder APIs
+Reminder scheduled job
+```
 
 ---
 
-## Step 6 — Define task lifecycle states
+# 8. Step 6 — Define task lifecycle states
 
-Automatic rescheduling requires explicit task states.
+## What to build
 
-Recommended states:
+Use explicit task states:
 
 ```text
 planned
@@ -147,347 +436,688 @@ overdue
 cancelled
 ```
 
-Also track:
+Also store:
 
-* Original planned date
-* Current planned date
-* Deadline
-* Estimated duration
-* Actual duration
-* Priority
-* Number of previous deferrals
-* Last activity time
-* Completion time
+* Original planned date.
+* Current planned date.
+* Deadline.
+* Estimated duration.
+* Actual duration.
+* Priority.
+* Number of deferrals.
+* Last activity time.
+* Completion time.
 
-Without these fields, the system cannot reliably distinguish a delayed task from an intentionally postponed task.
+## Why this step is necessary
+
+Automation must understand what happened to a task.
+
+Consider a task whose planned date was yesterday.
+
+It may be:
+
+* Forgotten.
+* Intentionally moved.
+* Completed late.
+* Cancelled.
+* Still in progress.
+
+Without lifecycle states, the system cannot distinguish these cases.
+
+For example:
+
+```text
+planned date passed
+```
+
+does not always mean:
+
+```text
+task is overdue
+```
+
+The user may have intentionally deferred it.
+
+## Output of this step
+
+Update the task model and task service before building overdue detection or rescheduling.
 
 ---
 
-## Step 7 — Build overdue-task detection
+# 9. Step 7 — Detect overdue tasks
 
-Create a deterministic service that identifies tasks requiring attention.
+## What to build
 
-A task may be considered overdue when:
+Create a deterministic service that checks tasks.
 
-* Its planned date has passed
-* It is not completed or cancelled
-* Its deadline has not been intentionally changed
-* It has not already been processed by the same automation cycle
+A task may be overdue when:
 
-The detector should classify overdue tasks by severity:
+```text
+planned date has passed
+and task is not completed
+and task is not cancelled
+and task was not intentionally moved
+```
 
-* **Low severity:** optional task, no close deadline
-* **Medium severity:** important task, still recoverable
-* **High severity:** deadline approaching or repeatedly deferred
+Classify overdue tasks:
 
-The detector should only identify the condition. It should not immediately move the task.
+### Low severity
+
+* Optional task.
+* Deadline is far away.
+* First delay.
+
+### Medium severity
+
+* Important task.
+* Delay affects the weekly plan.
+* Still recoverable.
+
+### High severity
+
+* Deadline is close.
+* Task has been postponed several times.
+* Missing it will affect an important goal.
+
+## Why this step is necessary
+
+The system must detect a problem before it can respond to it.
+
+This service should only answer:
+
+> Which tasks require attention?
+
+It should not immediately move tasks.
+
+Detection and action must remain separate:
+
+```text
+Overdue detector → identifies the problem
+Rescheduling service → proposes a solution
+User → approves important changes
+```
+
+This separation makes the system easier to test and safer to operate.
+
+## Output of this step
+
+Create:
+
+```text
+overdue_detection_service.py
+overdue detection scheduled job
+overdue event records
+```
 
 ---
 
-## Step 8 — Implement automatic rescheduling logic
+# 10. Step 8 — Build rescheduling proposals
 
-The rescheduling service determines where unfinished work can be moved.
+## What to build
 
-It should consider:
+When unfinished work exists, calculate possible future dates.
 
-* Task priority
-* Deadline
-* Estimated duration
-* Remaining weekly capacity
-* Daily workload limits
-* Phase 2 readiness score
-* Sleep, energy, mood, and stress data
-* Existing tasks on future days
-* Number of previous postponements
-* User working preferences
+Consider:
+
+* Priority.
+* Deadline.
+* Estimated duration.
+* Remaining weekly capacity.
+* Daily workload limit.
+* Energy and readiness.
+* Existing future tasks.
+* Preferred working periods.
+* Previous postponements.
 
 The process should be:
 
 ```text
 Find unfinished tasks
-→ calculate available future capacity
-→ rank tasks by urgency and importance
-→ select suitable future dates
-→ create a rescheduling proposal
-→ request confirmation when required
+→ calculate future available capacity
+→ rank tasks
+→ select possible dates
+→ create a proposal
+→ request confirmation
 → apply approved changes
-→ notify the user
 ```
 
-Do not repeatedly move the same task to the next day. After several deferrals, mark it as a persistent problem and ask the user to reconsider its scope, priority, or duration.
+## Why this step is necessary
 
----
+Simply moving all unfinished tasks to tomorrow creates a new problem.
 
-## Step 9 — Store rescheduling proposals
-
-Before changing the actual plan, store a proposal containing:
-
-* Tasks affected
-* Original dates
-* Proposed dates
-* Reason for each change
-* Expected workload after the change
-* Creation time
-* Expiration time
-* Status: pending, approved, rejected, applied, expired
-
-This gives the user visibility and allows the application to separate suggested actions from committed actions.
-
----
-
-## Step 10 — Implement procrastination detection
-
-Start with rule-based detection rather than machine learning.
-
-Possible signals include:
-
-* Task repeatedly deferred
-* Task is overdue
-* User starts a task but records little progress
-* Several reminders are ignored
-* Completion rate falls below the recent baseline
-* User frequently completes low-priority tasks while avoiding high-priority tasks
-* Planned study time is much higher than actual focus time
-* Similar tasks are consistently postponed
-* No task activity during preferred working periods
-
-The detector should produce:
-
-* Detection type
-* Severity
-* Supporting evidence
-* Related tasks
-* Confidence level
-* Recommended intervention
-
-Example classifications:
+Example:
 
 ```text
-Repeated postponement
-Planning overload
-Low-energy avoidance
-Task ambiguity
-Unrealistic duration estimate
-Deadline avoidance
+Tomorrow already contains 240 minutes of work
+Today's unfinished work adds another 180 minutes
+New total = 420 minutes
 ```
 
-Avoid treating every missed task as procrastination. Low energy, illness, lack of time, or external interruptions may explain the behavior.
+The plan becomes unrealistic.
+
+The rescheduling service must therefore consider workload capacity instead of only changing dates.
+
+## Important rule
+
+Do not repeatedly move the same task to the next day.
+
+After several deferrals:
+
+```text
+Task deferred 4 times
+→ stop automatic movement
+→ classify as persistent problem
+→ suggest reducing scope, duration, or priority
+```
+
+## Output of this step
+
+Create:
+
+```text
+rescheduling_service.py
+rescheduling proposal model
+proposal approval APIs
+```
 
 ---
 
-## Step 11 — Add intervention strategies
+# 11. Step 9 — Store proposals before applying changes
 
-After detecting a procrastination pattern, select a suitable intervention.
+## What to build
+
+A proposal should store:
+
+* Affected tasks.
+* Original dates.
+* Proposed dates.
+* Reason for each change.
+* Expected workload.
+* Creation time.
+* Expiration time.
+* Status.
+
+Recommended statuses:
+
+```text
+pending
+approved
+rejected
+applied
+expired
+```
+
+## Why this step is necessary
+
+A suggestion is not the same as an actual change.
+
+Without a proposal record, the system may directly modify tasks before the user reviews the result.
+
+The proposal creates a controlled workflow:
+
+```text
+System suggests
+→ user reviews
+→ user approves or rejects
+→ backend applies only approved changes
+```
+
+It also allows the frontend to display an automation inbox.
+
+## Output of this step
+
+Create:
+
+```text
+ReschedulingProposal
+ReschedulingProposalItem
+Approve/reject/apply services
+```
+
+---
+
+# 12. Step 10 — Detect procrastination patterns
+
+## What to build
+
+Begin with rules, not machine learning.
+
+Possible signals:
+
+* Task repeatedly deferred.
+* Several reminders ignored.
+* High-priority task repeatedly avoided.
+* Planned focus time is much higher than actual focus time.
+* User works on low-priority tasks instead of urgent tasks.
+* No activity during preferred working periods.
+* Completion rate is below the recent baseline.
+* Similar tasks are repeatedly postponed.
+
+Each detection should include:
+
+* Detection type.
+* Severity.
+* Evidence.
+* Related tasks.
+* Confidence.
+* Recommended intervention.
+
+Example types:
+
+```text
+repeated_postponement
+planning_overload
+task_ambiguity
+low_energy_avoidance
+unrealistic_duration
+deadline_avoidance
+```
+
+## Why this step is necessary
+
+An overdue task tells the system **what happened**.
+
+Procrastination detection tries to explain **what pattern may be causing it**.
+
+Example:
+
+```text
+Task A was missed once
+→ probably not enough evidence
+
+Task A was deferred five times
+and reminders were ignored
+and similar tasks were avoided
+→ repeated avoidance pattern
+```
+
+The system should not treat one missed task as proof of procrastination.
+
+## Output of this step
+
+Create:
+
+```text
+procrastination_detection_service.py
+procrastination_event model
+rule definitions
+```
+
+---
+
+# 13. Step 11 — Select an intervention
+
+## What to build
+
+Map detected patterns to possible responses.
 
 Examples:
 
-* Break a large task into smaller subtasks
-* Reduce the next work block to 15–25 minutes
-* Move optional tasks away from the current day
-* Ask the user to define the first concrete action
-* Schedule the avoided task during the user’s strongest working period
-* Replace a vague task with a measurable outcome
-* Reduce workload based on Phase 2 readiness
-* Ask the user whether the goal is still relevant
-
-The LLM can explain the intervention, but deterministic rules should decide which actions are allowed.
-
----
-
-## Step 12 — Build completion-probability forecasting
-
-The forecast estimates whether a weekly goal or task will be completed on time.
-
-Begin with a transparent scoring model, not a complex machine-learning model.
-
-Use features such as:
-
-* Remaining work
-* Remaining days
-* Recent completion rate
-* Average daily focus time
-* Estimated task duration
-* Deadline distance
-* Number of overdue tasks
-* Number of previous deferrals
-* Current readiness score
-* Historical performance on similar goals
-
-The result should include:
-
-* Completion probability
-* Risk level
-* Main risk factors
-* Required average daily effort
-* Current average daily effort
-* Recommended adjustment
-
-Example interpretation:
+### Large or unclear task
 
 ```text
-High probability: 75–100%
-Moderate probability: 40–74%
-Low probability: 0–39%
+Intervention:
+Break task into smaller subtasks.
+Ask for the first concrete action.
 ```
 
-The forecast should be recalculated after task completion, rescheduling, new check-ins, or major plan changes.
-
----
-
-## Step 13 — Compare forecasts with actual outcomes
-
-Store each forecast rather than replacing it.
-
-Later, compare:
-
-* Predicted probability
-* Actual completion result
-* Forecast date
-* Data available at forecast time
-
-This lets you evaluate whether the forecasting logic is useful.
-
-Track metrics such as:
-
-* Accuracy by risk category
-* Overconfidence
-* Underconfidence
-* Forecast error
-* Accuracy for different task types
-
-Phase 3 does not require a trained prediction model, but it should collect data that could support one later.
-
----
-
-## Step 14 — Add natural-language command classification
-
-Allow the user to control the system using commands such as:
+### Low energy
 
 ```text
-Move today’s unfinished tasks to tomorrow.
-What should I focus on now?
-Reduce today’s workload.
-Remind me about the database task at 8 PM.
+Intervention:
+Reduce the next work block.
+Move optional tasks.
+```
+
+### Repeated avoidance
+
+```text
+Intervention:
+Schedule task during strongest working period.
+Ask whether the task is still relevant.
+```
+
+### Unrealistic planning
+
+```text
+Intervention:
+Reduce daily workload.
+Update task-duration estimate.
+```
+
+## Why this step is necessary
+
+Detection without a response is not useful.
+
+The intervention layer answers:
+
+> Given this detected problem, what should the system recommend?
+
+Rules should decide which interventions are allowed.
+
+The LLM may explain the recommendation in natural language, but it should not decide permission boundaries.
+
+## Output of this step
+
+Create:
+
+```text
+intervention_service.py
+mapping between detection types and interventions
+```
+
+---
+
+# 14. Step 12 — Forecast goal completion
+
+## What to build
+
+Estimate whether a task or weekly goal will be completed on time.
+
+Start with a transparent formula.
+
+Use data such as:
+
+* Remaining work.
+* Remaining days.
+* Recent completion rate.
+* Average daily focus time.
+* Required daily effort.
+* Deadline distance.
+* Number of overdue tasks.
+* Previous deferrals.
+* Current readiness.
+* Historical performance.
+
+Return:
+
+* Completion probability.
+* Risk level.
+* Risk factors.
+* Required daily effort.
+* Current daily effort.
+* Recommended adjustment.
+
+Example:
+
+```text
+Weekly goal: 15 hours
+Completed: 6 hours
+Remaining: 9 hours
+Days remaining: 3
+Required effort: 3 hours/day
+Current average: 1.8 hours/day
+
+Risk level: high
+```
+
+## Why this step is necessary
+
+Overdue detection identifies a problem that has already happened.
+
+Forecasting tries to identify a problem before it happens.
+
+For example:
+
+```text
+No tasks are overdue yet
+but current progress is too slow
+→ weekly goal is likely to fail
+```
+
+This gives the system time to recommend an adjustment.
+
+## Output of this step
+
+Create:
+
+```text
+forecast_service.py
+forecast model
+forecast scheduled job
+forecast APIs
+```
+
+---
+
+# 15. Step 13 — Store forecast history
+
+## What to build
+
+Do not overwrite old forecasts.
+
+Store:
+
+* Forecast time.
+* Predicted probability.
+* Risk level.
+* Data used.
+* Actual final outcome.
+
+## Why this step is necessary
+
+Without history, you cannot evaluate whether the forecasting logic is accurate.
+
+Example:
+
+```text
+Monday forecast: 80%
+Wednesday forecast: 55%
+Friday result: incomplete
+```
+
+Later, the system can measure:
+
+* Overconfidence.
+* Underconfidence.
+* Error by goal type.
+* Accuracy by risk category.
+
+This data can support a learned model in Phase 4.
+
+## Output of this step
+
+Create:
+
+```text
+ForecastHistory
+ForecastOutcomeEvaluation
+```
+
+---
+
+# 16. Step 14 — Add natural-language commands
+
+## What to build
+
+Allow commands such as:
+
+```text
+Move today's unfinished tasks to tomorrow.
+Remind me about FastAPI at 8 PM.
+Reduce today's workload.
 Why am I behind this week?
-Show tasks at risk of missing their deadlines.
+What should I focus on now?
 ```
 
-The first task is intent classification.
-
-Recommended intents:
+Map them to intents:
 
 ```text
-view_today_plan
 create_reminder
-update_reminder
-complete_task
 reschedule_task
 reduce_workload
 get_progress
 get_forecast
 get_coaching
-generate_weekly_review
+complete_task
 unknown
 ```
 
-The command system should extract structured parameters such as:
+Extract parameters such as:
 
-* Task
-* Date
-* Time
-* Duration
-* Priority
-* Requested action
-* Confirmation status
+* Task.
+* Date.
+* Time.
+* Duration.
+* Requested action.
+* Priority.
+
+## Why this step is necessary
+
+Users should not need to manually open several forms for every action.
+
+Natural-language commands provide a simpler interface.
+
+However, the LLM should only convert language into structured data.
+
+Example:
+
+```text
+User message
+→ intent: create_reminder
+→ task: FastAPI
+→ time: 20:00
+```
+
+The LLM should not directly update the database.
+
+## Output of this step
+
+Create:
+
+```text
+command schema
+intent classifier
+parameter extractor
+command API
+```
 
 ---
 
-## Step 15 — Convert commands into tool calls
+# 17. Step 15 — Map commands to backend services
 
-Each command intent should map to an existing backend service.
+## What to build
 
-For example:
+Connect each intent to an existing service.
+
+Examples:
 
 ```text
-“Remind me about FastAPI at 8 PM”
-→ create reminder tool
+create_reminder
+→ reminder_service.create()
 ```
 
 ```text
-“Move unfinished tasks to tomorrow”
-→ generate rescheduling proposal tool
+reschedule_task
+→ rescheduling_service.create_proposal()
 ```
 
 ```text
-“How likely am I to finish this week?”
-→ completion forecast tool
+get_forecast
+→ forecast_service.get_current()
 ```
 
-Do not let the LLM directly update the database.
+## Why this step is necessary
+
+The LLM is not the business-logic layer.
+
+The backend must still enforce:
+
+* Authentication.
+* Ownership checks.
+* Validation.
+* Permission rules.
+* Confirmation requirements.
+* Database constraints.
 
 The correct flow is:
 
 ```text
 User command
-→ LLM extracts intent and arguments
-→ backend validates arguments
-→ approved service is called
+→ LLM extracts structured intent
+→ backend validates it
+→ approved service executes
 → result is returned
 ```
 
-This keeps authentication, ownership checks, and business rules inside normal application services.
+## Output of this step
+
+Create a controlled tool registry or command dispatcher.
 
 ---
 
-## Step 16 — Add confirmation for write operations
+# 18. Step 16 — Add confirmation for write operations
 
-Natural-language commands that change data should use confirmation.
+## What to build
+
+Read-only commands may run immediately.
+
+Examples:
+
+```text
+Show my forecast.
+Why am I behind?
+What should I focus on?
+```
+
+Commands that change data should require confirmation.
 
 Example:
 
 ```text
-User: Move my unfinished tasks to tomorrow.
+User:
+Move today's unfinished tasks to tomorrow.
 
 System:
-Three tasks will be moved:
-- FastAPI router practice
-- PostgreSQL notes
-- README update
-
-Tomorrow’s planned workload will become 210 minutes.
+Three tasks will be moved.
+Tomorrow's workload will become 210 minutes.
 Confirm?
 ```
 
-After confirmation:
+## Why this step is necessary
+
+Natural language can be ambiguous.
+
+The user may not understand the full effect of the requested action.
+
+Confirmation lets the system show:
+
+* Which records will change.
+* How workload will change.
+* Whether deadlines are affected.
+
+## Output of this step
+
+Create:
 
 ```text
-Apply proposal
-→ record automation action
-→ return updated plan
+pending command model
+confirm command API
+reject command API
 ```
-
-Read-only commands do not require confirmation.
 
 ---
 
-## Step 17 — Add a lightweight coordinator workflow
+# 19. Step 17 — Add a coordinator workflow
 
-After reminder, rescheduling, forecasting, and command services work independently, connect them with a coordinator.
+## What to build
+
+After all independent services work, connect them through one coordinator.
 
 The coordinator should:
 
-1. Receive a natural-language request.
-2. Determine the intent.
-3. Load required context.
-4. Select one approved tool.
-5. Execute the tool.
-6. Determine whether confirmation is required.
-7. Return the result.
-8. Record the execution.
+1. Receive the request.
+2. Classify intent.
+3. Extract parameters.
+4. Load required context.
+5. Validate the request.
+6. Choose one approved service.
+7. Check whether confirmation is needed.
+8. Execute or store a pending action.
+9. Format the result.
+10. Record the execution.
 
-LangGraph can be introduced here, but only after the underlying services already work.
-
-A simple graph is sufficient:
+A simple workflow is enough:
 
 ```text
 Receive command
@@ -500,60 +1130,93 @@ Need confirmation?
    ↙             ↘
  yes              no
  ↓                 ↓
-Store pending     Execute tool
+Store pending     Execute service
 action             ↓
-   ↘             Format response
+   ↘             Format result
 ```
 
-Do not build separate planner, coach, reminder, and analytics agents in Phase 3. One coordinator with tools is enough.
+## Why this step comes late
+
+The coordinator depends on the other services.
+
+If the reminder service, forecast service, and rescheduling service do not exist, the coordinator has nothing reliable to call.
+
+Therefore:
+
+```text
+Build services first
+→ connect them with the coordinator later
+```
+
+Do not build several specialized agents in Phase 3.
+
+One coordinator with approved tools is enough.
+
+## Output of this step
+
+Create a simple LangGraph workflow or normal Python coordinator service.
 
 ---
 
-## Step 18 — Add automation audit records
+# 20. Step 18 — Add audit records
 
-Every automated action should be traceable.
+## What to build
 
-Record:
+Record every automated action:
 
-* User
-* Trigger source
-* Automation type
-* Input data
-* Decision
-* Tool called
-* Records changed
-* Whether confirmation was required
-* Execution status
-* Failure reason
-* Start and completion times
+* User.
+* Trigger source.
+* Automation type.
+* Input.
+* Decision.
+* Service called.
+* Records changed.
+* Confirmation status.
+* Execution status.
+* Failure reason.
+* Start time.
+* Completion time.
 
-Trigger sources may include:
+Possible trigger sources:
 
 ```text
 scheduler
 user_command
 API_request
-procrastination_detector
 forecast_threshold
+procrastination_detector
 ```
 
-This is essential for debugging unexpected schedule changes.
+## Why this step is necessary
+
+Automation may change plans without the user manually opening an edit form.
+
+When something unexpected happens, you need to answer:
+
+* What changed?
+* Why did it change?
+* Which process triggered it?
+* Did the user approve it?
+* Did the action succeed?
+
+Without audit logs, debugging automation becomes very difficult.
+
+## Output of this step
+
+Create:
+
+```text
+AutomationAudit
+AutomationAction
+```
 
 ---
 
-## Step 19 — Add idempotency and concurrency protection
+# 21. Step 19 — Prevent duplicate execution
 
-Scheduled jobs may run more than once because of retries, restarts, or multiple workers.
+## What to build
 
-Protect against:
-
-* Sending the same reminder twice
-* Creating duplicate rescheduling proposals
-* Processing the same overdue task repeatedly
-* Generating duplicate forecasts for the same period
-* Applying the same approved action twice
-
-Use unique job identifiers and action states such as:
+Use unique action identifiers and execution states:
 
 ```text
 pending
@@ -563,290 +1226,401 @@ failed
 cancelled
 ```
 
-Only one worker should be able to claim a pending action.
+Ensure only one process can claim an action.
+
+Protect against:
+
+* Duplicate reminders.
+* Duplicate forecasts.
+* Duplicate proposals.
+* Applying one proposal twice.
+* Processing one overdue task repeatedly.
+
+## Why this step is necessary
+
+Scheduled jobs may run more than once because of:
+
+* Scheduler restart.
+* Network retry.
+* Docker restart.
+* Multiple workers.
+* Job timeout.
+* Manual retry.
+
+For example:
+
+```text
+Notification sent successfully
+→ process crashes before status is saved
+→ job runs again
+→ same notification is sent twice
+```
+
+Idempotency ensures that repeating the same operation does not create additional effects.
+
+## Output of this step
+
+Add:
+
+```text
+unique execution key
+database uniqueness constraints
+row locking or atomic claim operation
+```
 
 ---
 
-## Step 20 — Add failure recovery
+# 22. Step 20 — Add failure recovery
 
-Define behavior for common failures:
+## What to build
 
-* Notification provider unavailable
-* Cloud Ollama timeout
-* Invalid LLM command output
-* Database temporarily unavailable
-* Scheduler restart
-* Task changed while a proposal is pending
-* User timezone changed
-* Reminder execution delayed
+Define behavior for failures.
 
-Recommended behavior:
+### Temporary failure
 
-```text
-Transient failure
-→ retry with limits
-```
+Examples:
+
+* Notification provider unavailable.
+* Database connection temporarily fails.
+* Cloud Ollama times out.
+
+Response:
 
 ```text
-Invalid request or stale proposal
-→ mark as failed or expired
+retry with a maximum limit
 ```
+
+### Invalid or stale action
+
+Examples:
+
+* Task was completed after proposal creation.
+* User changed the task date.
+* Proposal expired.
+
+Response:
 
 ```text
-LLM unavailable
-→ keep deterministic reminders, detection, and forecasting operational
+mark proposal as expired or failed
+do not apply it
 ```
 
-Automation should not depend entirely on the cloud model.
+### LLM unavailable
+
+Response:
+
+```text
+continue deterministic reminders
+continue overdue detection
+continue forecasts
+skip AI-generated explanation
+```
+
+## Why this step is necessary
+
+Automation runs without the user watching every operation.
+
+Failures must therefore be handled automatically and predictably.
+
+The entire automation system should not stop because the cloud model is unavailable.
+
+## Output of this step
+
+Create:
+
+```text
+retry policy
+failure states
+stale-data validation
+fallback behavior
+```
 
 ---
 
-## Step 21 — Add Phase 3 APIs
+# 23. Step 21 — Add Phase 3 APIs
 
-Create APIs for:
+## What to build
 
-### Reminders
-
-```text
-Create reminder
-List reminders
-Update reminder
-Disable reminder
-Delete reminder
-View notification history
-```
-
-### Automation
+### Reminder APIs
 
 ```text
-Run overdue-task detection
-Generate rescheduling proposal
-View pending proposals
-Approve proposal
-Reject proposal
-View automation history
+POST   /reminders
+GET    /reminders
+PATCH  /reminders/{id}
+DELETE /reminders/{id}
+GET    /notification-history
 ```
 
-### Forecasts
+### Automation APIs
 
 ```text
-Generate weekly forecast
-Get current forecast
-Get forecast history
+POST /automation/detect-overdue
+POST /automation/rescheduling-proposals
+GET  /automation/proposals
+POST /automation/proposals/{id}/approve
+POST /automation/proposals/{id}/reject
+GET  /automation/history
 ```
 
-### Commands
+### Forecast APIs
 
 ```text
-Submit natural-language command
-Confirm pending command
-Reject pending command
-View command history
+POST /forecasts/weekly
+GET  /forecasts/current
+GET  /forecasts/history
 ```
 
-These APIs should use existing authentication and ownership checks.
+### Command APIs
+
+```text
+POST /commands
+POST /commands/{id}/confirm
+POST /commands/{id}/reject
+GET  /commands/history
+```
+
+## Why this step is necessary
+
+The frontend and scheduler need stable ways to access the services.
+
+APIs expose the completed business functions to:
+
+* Frontend pages.
+* Natural-language coordinator.
+* Manual testing.
+* Future integrations.
+
+## Output of this step
+
+Create routers and schemas using the services already implemented.
 
 ---
 
-## Step 22 — Add frontend interfaces
+# 24. Step 22 — Add frontend interfaces
 
-Phase 3 requires five main frontend areas.
+## What to build
 
 ### Reminder settings
 
-The user configures:
+Allow the user to configure:
 
-* Reminder times
-* Channels
-* Quiet hours
-* Enabled reminder types
+* Reminder times.
+* Quiet hours.
+* Notification channels.
+* Enabled reminder types.
 
 ### Automation inbox
 
-Display pending actions such as:
+Display:
 
-* Rescheduling proposals
-* Workload reduction suggestions
-* Persistent procrastination warnings
-* Confirmation requests
+* Rescheduling proposals.
+* Confirmation requests.
+* Procrastination warnings.
+* Workload reduction suggestions.
 
 ### Forecast panel
 
 Display:
 
-* Completion probability
-* Risk level
-* Required daily effort
-* Main risk factors
-* Recommended changes
+* Completion probability.
+* Risk level.
+* Required daily effort.
+* Current daily effort.
+* Main risk factors.
 
-### Natural-language command box
+### AI command box
 
-Allow users to enter commands and review parsed actions before approval.
+Allow the user to enter commands and review parsed actions.
 
 ### Automation history
 
-Show:
+Display:
 
-* What happened
-* Why it happened
-* Whether it was automatic or user-triggered
-* Which records changed
-* Whether the action succeeded
+* What happened.
+* Why it happened.
+* What changed.
+* Whether approval was required.
+* Whether the action succeeded.
 
----
+## Why this step comes last
 
-# Recommended implementation order
+The frontend depends on completed backend APIs.
 
-Follow this order:
+Building the frontend first would require mock data and frequent redesign when backend models change.
 
-1. Define automation permissions and confirmation rules.
-2. Add user timezone and automation preferences.
-3. Build one notification provider.
-4. Add reminder storage and reminder APIs.
-5. Add the separate scheduler service.
-6. Implement reminder execution and delivery history.
-7. Finalize task lifecycle states.
-8. Implement overdue-task detection.
-9. Implement rescheduling proposals.
-10. Add proposal approval and rejection.
-11. Implement rule-based procrastination detection.
-12. Add intervention recommendations.
-13. Implement deterministic completion forecasting.
-14. Store forecast history and outcomes.
-15. Add natural-language intent classification.
-16. Map intents to existing application services.
-17. Add confirmation for command-based changes.
-18. Introduce the coordinator workflow.
-19. Add automation audit logging.
-20. Add idempotency and failure recovery.
-21. Add frontend automation screens.
-22. Test the complete proactive workflow.
-
----
-
-# Phase 3 testing requirements
-
-Test each feature independently.
-
-## Reminder tests
-
-Verify:
-
-* Reminder is created correctly.
-* Correct timezone conversion is used.
-* Completed-task reminders are skipped.
-* Quiet hours are respected.
-* Duplicate notifications are prevented.
-* Failed deliveries are recorded.
-
-## Rescheduling tests
-
-Verify:
-
-* High-priority tasks are preserved.
-* Deadlines are respected.
-* Daily capacity is not exceeded.
-* Phase 2 workload adjustment is applied.
-* Repeatedly deferred tasks are escalated.
-* Rejected proposals do not modify tasks.
-* Approved proposals are applied once.
-
-## Procrastination tests
-
-Verify:
-
-* One missed task does not automatically produce a high-severity event.
-* Repeated deferral is detected.
-* Low completion rate is detected.
-* Evidence is recorded.
-* Duplicate events are avoided.
-
-## Forecast tests
-
-Verify:
-
-* Remaining work and time are calculated correctly.
-* Probability remains between 0 and 100%.
-* Risk increases when deadlines approach.
-* Risk decreases after task completion.
-* Forecast history is preserved.
-
-## Command tests
-
-Verify:
-
-* Intents are identified correctly.
-* Parameters are validated.
-* Read-only commands execute directly.
-* Write commands require confirmation.
-* Users cannot modify another user’s data.
-* Invalid LLM output cannot call arbitrary services.
-
-## Scheduler tests
-
-Verify:
-
-* Jobs execute once.
-* Failed jobs retry correctly.
-* Restarted scheduler recovers pending jobs.
-* Concurrent workers do not process the same action twice.
-
----
-
-# Features to leave for Phase 4
-
-Do not add these yet:
-
-* Separate specialized agents
-* Agent-to-agent communication
-* Long-term semantic memory
-* pgvector retrieval
-* Calendar synchronization
-* Predictive habit modeling
-* Learned forecasting models
-* Wearable-device data
-* Autonomous long-term goal modification
-* Complex workflow infrastructure such as Temporal
-
-Phase 3 should make the current application proactive without making it fully autonomous.
-
----
-
-# Phase 3 completion checklist
-
-Phase 3 is complete when this workflow functions:
+The safer order is:
 
 ```text
-1. User defines reminder and automation preferences.
-2. Scheduler runs independently from FastAPI.
-3. Morning and task reminders are sent at the correct local time.
-4. Missed tasks are detected automatically.
-5. The system proposes realistic rescheduling changes.
-6. Sensitive changes require user approval.
-7. Repeated avoidance patterns generate procrastination events.
-8. The system recommends specific interventions.
-9. Weekly-goal completion probability is calculated and stored.
-10. Forecasts update when behavior or plans change.
-11. Natural-language commands are converted into validated tool calls.
-12. Write operations require confirmation.
-13. Every automated action has an audit record.
-14. Duplicate scheduled actions are prevented.
-15. Core automation continues working when cloud Ollama is unavailable.
-16. The frontend displays reminders, proposals, forecasts, and automation history.
-17. All Phase 1, Phase 2, and Phase 3 tests pass.
+Database and services
+→ scheduler and automation
+→ APIs
+→ frontend
 ```
 
-The final Phase 3 system should operate as:
+---
+
+# 25. Recommended implementation order
+
+The previous sections describe the complete architecture.
+
+For actual coding, use this smaller implementation sequence.
+
+## Stage A — Safety and configuration
+
+1. Define automation permissions.
+2. Add user automation preferences.
+3. Finalize task lifecycle states.
+
+Reason:
+
+```text
+Automation must know what it may do,
+when it may do it,
+and what each task state means.
+```
+
+## Stage B — Basic proactive behavior
+
+4. Build one notification provider.
+5. Add reminder storage and APIs.
+6. Add the separate APScheduler service.
+7. Execute due reminders.
+
+Reason:
+
+```text
+This creates the first complete proactive workflow:
+time arrives → scheduler runs → notification is sent
+```
+
+## Stage C — Detect execution problems
+
+8. Add overdue-task detection.
+9. Add rule-based procrastination detection.
+10. Add intervention recommendations.
+
+Reason:
+
+```text
+The system can now observe execution and identify problems.
+```
+
+## Stage D — Adapt the plan
+
+11. Add rescheduling proposals.
+12. Add approval and rejection.
+13. Apply approved changes.
+
+Reason:
+
+```text
+The system can propose plan changes without modifying data silently.
+```
+
+## Stage E — Predict future risk
+
+14. Add completion forecasting.
+15. Store forecast history.
+16. Compare predictions with actual results.
+
+Reason:
+
+```text
+The system can identify future risk before goals fail.
+```
+
+## Stage F — Natural-language control
+
+17. Add command classification.
+18. Map commands to backend services.
+19. Add confirmation for write operations.
+20. Add the coordinator workflow.
+
+Reason:
+
+```text
+Natural language becomes an interface to services that already work.
+```
+
+## Stage G — Reliability and interface
+
+21. Add audit records.
+22. Add idempotency.
+23. Add failure recovery.
+24. Add Phase 3 frontend pages.
+25. Test the complete workflow.
+
+Reason:
+
+```text
+The automation becomes traceable, reliable, and usable.
+```
+
+---
+
+# 26. Minimum Phase 3 version
+
+You do not need to implement all advanced features immediately.
+
+The minimum useful Phase 3 version is:
+
+```text
+1. User configures reminder preferences.
+2. Scheduler runs as a separate Docker service.
+3. Scheduler finds due reminders.
+4. Notification service sends Telegram or email messages.
+5. Overdue tasks are detected.
+6. System creates a rescheduling proposal.
+7. User approves or rejects the proposal.
+8. Approved changes are applied once.
+9. Every action is recorded.
+```
+
+After this workflow works, add:
+
+```text
+procrastination detection
+completion forecasting
+natural-language commands
+LangGraph coordinator
+```
+
+---
+
+# 27. Phase 3 completion condition
+
+Phase 3 is complete when the following scenario works:
+
+```text
+1. The user creates tasks and weekly goals.
+2. The user chooses reminder times and quiet hours.
+3. The scheduler runs independently from FastAPI.
+4. The scheduler sends reminders at the correct local time.
+5. An unfinished task becomes overdue.
+6. The overdue detector identifies it.
+7. The rescheduling service finds available future capacity.
+8. The system creates a proposal instead of directly changing the task.
+9. The user approves the proposal.
+10. The backend safely updates the task.
+11. The weekly forecast is recalculated.
+12. The user receives a notification.
+13. The system stores an audit record.
+14. Restarting the scheduler does not duplicate the action.
+```
+
+The final Phase 3 execution loop is:
 
 ```text
 Plan
-→ observe execution
-→ detect risk
-→ forecast outcome
-→ propose intervention
-→ receive approval
-→ adjust plan
-→ notify user
-→ record result
+→ schedule
+→ observe
+→ detect
+→ forecast
+→ propose
+→ confirm
+→ apply
+→ notify
+→ record
 ```
+
+This is the purpose of the Phase 3 steps: each one builds a required part of a safe, proactive automation loop.

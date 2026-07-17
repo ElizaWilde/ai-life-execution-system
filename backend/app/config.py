@@ -9,6 +9,19 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = 120
     notion_api_key: str | None = None
     notion_database_id: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    smtp_timeout_seconds: float = 15
+    telegram_bot_token: str | None = None
+    telegram_timeout_seconds: float = 15
+    scheduler_poll_seconds: float = 60
+    scheduler_notification_grace_minutes: int = 60
+    scheduler_stale_sending_minutes: int = 10
     jwt_secret: str = "dev-secret"
 
     class Config:

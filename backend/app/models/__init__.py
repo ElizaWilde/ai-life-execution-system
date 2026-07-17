@@ -6,6 +6,7 @@ from app.models.daily_task import DailyTask
 from app.models.notification import Notification
 from app.models.study_session import StudySession
 from app.models.user import User
+from app.models.user_app_setting import UserAppSetting
 from app.models.weekly_goal import WeeklyGoal
 from app.models.weekly_review import WeeklyReview
 
@@ -21,6 +22,7 @@ __all__ = [
     "Notification",
     "StudySession",
     "User",
+    "UserAppSetting",
     "WeeklyGoal",
     "WeeklyReview",
 ]

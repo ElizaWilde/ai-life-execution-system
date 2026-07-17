@@ -3,8 +3,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.automation_preference import NotificationChannel
-
 
 NotificationType = Literal[
     "morning_plan",
@@ -14,14 +12,17 @@ NotificationType = Literal[
     "evening_check_in",
     "weekly_review",
     "rescheduling_proposal",
+    "procrastination_alert",
+    "completion_forecast",
 ]
-NotificationStatus = Literal["pending", "delivered", "failed"]
+NotificationStatus = Literal["pending", "sending", "delivered", "failed"]
 
 
 class NotificationSend(BaseModel):
     notification_type: NotificationType
-    message: str = Field(min_length=1, max_length=4000)
-    channel: NotificationChannel | None = None
+    subject: str | None = Field(default=None, min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=10_000)
+    channel: Literal["email", "telegram"] | None = None
     scheduled_at: datetime | None = None
 
     @field_validator("message")
@@ -34,11 +35,11 @@ class NotificationSend(BaseModel):
 
     @field_validator("scheduled_at")
     @classmethod
-    def validate_scheduled_at(cls, value: datetime | None) -> datetime | None:
+    def require_aware_scheduled_time(cls, value: datetime | None) -> datetime | None:
         if value is not None and (
             value.tzinfo is None or value.utcoffset() is None
         ):
-            raise ValueError("scheduled_at must include a timezone offset")
+            raise ValueError("scheduled_at must include a timezone")
         return value
 
 
@@ -48,11 +49,17 @@ class NotificationRead(BaseModel):
     id: int
     user_id: int
     notification_type: NotificationType
-    channel: NotificationChannel
+    channel: Literal["email", "telegram"]
+    recipient: str
+    subject: str
     message: str
     scheduled_at: datetime
     delivered_at: datetime | None
+    last_attempt_at: datetime | None
     status: NotificationStatus
     failure_reason: str | None
+    attempt_count: int
+    max_attempts: int
+    deduplication_key: str | None
     created_at: datetime
     updated_at: datetime

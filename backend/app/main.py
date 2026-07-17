@@ -13,8 +13,11 @@ from app.api import (
     daily_tasks,
     dashboard,
     notion,
+    notifications,
     reviews,
     study_sessions,
+    users,
+    user_app_settings,
     weekly_goals,
     weekly_reviews,
 )
@@ -46,6 +49,9 @@ app.include_router(check_ins.router, prefix="/check-ins", tags=["Check-ins"])
 app.include_router(coaching.router, prefix="/coaching", tags=["Coaching"])
 app.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
 app.include_router(notion.router, prefix="/notion", tags=["Notion"])
+app.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+app.include_router(users.router, prefix="/users", tags=["Users"])
+app.include_router(user_app_settings.router, prefix="/app-settings", tags=["App Settings"])
 app.include_router(weekly_goals.router, prefix="/weekly-goals", tags=["Weekly Goals"])
 app.include_router(
     weekly_reviews.router,

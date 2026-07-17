@@ -54,7 +54,12 @@ from app.schemas.study_session import (
     StudySessionRead,
     StudySessionStart,
 )
-from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserRead
+from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserRead, UserUpdate
+from app.schemas.user_app_setting import (
+    Integration,
+    UserAppSettingRead,
+    UserAppSettingUpdate,
+)
 from app.schemas.weekly_goal import (
     WeeklyGoalCreate,
     WeeklyGoalRead,
@@ -104,6 +109,10 @@ __all__ = [
     "UserCreate",
     "UserLogin",
     "UserRead",
+    "UserUpdate",
+    "Integration",
+    "UserAppSettingRead",
+    "UserAppSettingUpdate",
     "WeekDashboardResponse",
     "WeeklyGoalCreate",
     "WeeklyGoalRead",

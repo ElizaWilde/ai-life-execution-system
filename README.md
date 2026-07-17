@@ -91,7 +91,7 @@ The system uses several types of memory:
 | Database             | PostgreSQL                                   |
 | Vector Memory        | pgvector                                     |
 | Cache                | Redis                                        |
-| Scheduler            | APScheduler                                  |
+| Scheduler            | Dedicated Python worker                      |
 | Knowledge Management | Notion API                                   |
 | Calendar             | Google Calendar API                          |
 | Notifications        | Telegram, Discord, Email, Push Notifications |
@@ -127,6 +127,30 @@ For follow-up turns, send earlier `user` and `assistant` messages in `history`.
 The first version is intentionally stateless: the client owns conversation history,
 and the Coordinator does not call tools or persist memory yet. Interactive API docs
 are available at `http://localhost:8000/docs`.
+
+## Background Automation Scheduler
+
+The scheduler runs as a separate Docker service, not inside FastAPI. It checks due
+notifications, overdue work, procrastination signals, completion forecasts,
+rescheduling proposals, and users' morning/evening notification times.
+
+Apply database migrations before starting or upgrading the service:
+
+```powershell
+docker compose run --rm backend alembic upgrade head
+docker compose up -d --build backend scheduler frontend
+```
+
+Inspect scheduler activity with:
+
+```powershell
+docker compose logs -f scheduler
+```
+
+`SCHEDULER_POLL_SECONDS` controls the polling interval. Generated notifications
+have database-backed deduplication keys, and PostgreSQL advisory locking prevents
+two scheduler replicas from executing the same cycle. Rescheduling jobs only send
+proposals; they never modify task dates without confirmation.
 
 ## Execution Loop
 

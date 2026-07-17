@@ -23,6 +23,7 @@ def _to_read(preference: AutomationPreference) -> AutomationPreferenceRead:
         morning_reminder_time=preference.morning_reminder_time,
         evening_review_time=preference.evening_review_time,
         notification_channel=preference.notification_channel,
+        telegram_chat_id=preference.telegram_chat_id,
         automatic_rescheduling_enabled=preference.automatic_rescheduling_enabled,
         confirmation_required=preference.confirmation_required,
         max_reminders_per_day=preference.max_reminders_per_day,

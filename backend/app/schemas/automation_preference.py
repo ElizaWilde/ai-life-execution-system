@@ -32,7 +32,8 @@ class AutomationPreferenceFields(BaseModel):
     timezone: str = Field(default="Asia/Singapore", min_length=1, max_length=100)
     morning_reminder_time: time = time(8, 0)
     evening_review_time: time = time(21, 0)
-    notification_channel: NotificationChannel = "in_app"
+    notification_channel: NotificationChannel = "email"
+    telegram_chat_id: str | None = Field(default=None, max_length=40)
     automatic_rescheduling_enabled: bool = False
     confirmation_required: bool = True
     max_reminders_per_day: int = Field(default=3, ge=0, le=20)
@@ -50,6 +51,16 @@ class AutomationPreferenceFields(BaseModel):
         max_length=7,
     )
     preferred_study_periods: list[StudyPeriod] = Field(default_factory=list, max_length=5)
+
+    @field_validator("telegram_chat_id")
+    @classmethod
+    def validate_telegram_chat_id(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        if not normalized.lstrip("-").isdigit():
+            raise ValueError("Telegram chat ID must be numeric")
+        return normalized
 
     @field_validator("timezone")
     @classmethod
@@ -73,6 +84,7 @@ class AutomationPreferenceUpdate(BaseModel):
     morning_reminder_time: time | None = None
     evening_review_time: time | None = None
     notification_channel: NotificationChannel | None = None
+    telegram_chat_id: str | None = Field(default=None, max_length=40)
     automatic_rescheduling_enabled: bool | None = None
     confirmation_required: bool | None = None
     max_reminders_per_day: int | None = Field(default=None, ge=0, le=20)
@@ -80,6 +92,16 @@ class AutomationPreferenceUpdate(BaseModel):
     quiet_hours_end: time | None = None
     working_days: list[WorkingDay] | None = Field(default=None, min_length=1, max_length=7)
     preferred_study_periods: list[StudyPeriod] | None = Field(default=None, max_length=5)
+
+    @field_validator("telegram_chat_id")
+    @classmethod
+    def validate_telegram_chat_id(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        if not normalized.lstrip("-").isdigit():
+            raise ValueError("Telegram chat ID must be numeric")
+        return normalized
 
     @field_validator("timezone")
     @classmethod

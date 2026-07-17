@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserCreate(BaseModel):
@@ -20,6 +20,23 @@ class UserLogin(BaseModel):
         pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
     )
     password: str = Field(min_length=1, max_length=128)
+
+
+class UserUpdate(BaseModel):
+    email: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=320,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Display name must not be blank")
+        return value
 
 
 class UserRead(BaseModel):

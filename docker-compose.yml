@@ -23,6 +23,18 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  scheduler:
+    build: ./backend
+    container_name: life_execution_scheduler
+    command: ["python", "-m", "app.scheduler"]
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   frontend:
     build:
       context: ./frontend

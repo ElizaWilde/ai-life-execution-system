@@ -17,6 +17,36 @@ export type WorkloadLevel = "light" | "reduced" | "normal";
 export type NotificationChannel = "in_app" | "email" | "telegram";
 export type WorkingDay = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
 
+export type UserProfile = {
+  id: number;
+  email: string;
+  display_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UserAppSettings = {
+  id: number;
+  user_id: number;
+  week_start: "Monday" | "Sunday";
+  focus_minutes: 25 | 45 | 60;
+  short_break_minutes: 5 | 10;
+  long_break_minutes: 15 | 30;
+  workload: "light" | "medium" | "high";
+  theme: "light" | "dark" | "auto";
+  tone: "supportive" | "direct" | "reflective";
+  strictness: "flexible" | "balanced" | "strict";
+  adjustment: "gentle" | "moderate" | "strong";
+  proactive: boolean;
+  focus_matters: boolean;
+  protect_deep_work: boolean;
+  learn_from_feedback: boolean;
+  integrations: ("Google Calendar" | "Notion" | "Telegram" | "Gmail")[];
+  avatar_data_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AutomationPreferences = {
   id: number;
   user_id: number;
@@ -24,6 +54,7 @@ export type AutomationPreferences = {
   morning_reminder_time: string;
   evening_review_time: string;
   notification_channel: NotificationChannel;
+  telegram_chat_id: string | null;
   automatic_rescheduling_enabled: boolean;
   confirmation_required: boolean;
   max_reminders_per_day: number;
@@ -33,6 +64,19 @@ export type AutomationPreferences = {
   preferred_study_periods: { start: string; end: string }[];
   created_at: string;
   updated_at: string;
+};
+
+export type NotificationDelivery = {
+  id: number;
+  notification_type: string;
+  channel: "email" | "telegram";
+  recipient: string;
+  subject: string;
+  message: string;
+  status: "pending" | "sending" | "delivered" | "failed";
+  failure_reason: string | null;
+  attempt_count: number;
+  delivered_at: string | null;
 };
 
 export type WeeklyGoal = {
@@ -223,6 +267,31 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  getCurrentUser: () => request<UserProfile>("/users/me"),
+  updateCurrentUser: (body: { email?: string; display_name?: string }) =>
+    request<UserProfile>("/users/me", { method: "PATCH", body }),
+  getAppSettings: () => request<UserAppSettings>("/app-settings/me"),
+  updateAppSettings: (body: Omit<UserAppSettings, "id" | "user_id" | "created_at" | "updated_at">) =>
+    request<UserAppSettings>("/app-settings/me", { method: "PUT", body }),
+  sendTestEmail: () => request<NotificationDelivery>("/notifications", {
+    method: "POST",
+    body: {
+      notification_type: "upcoming_task",
+      subject: "AI Life test notification",
+      message: "Your AI Life email notifications are configured correctly.",
+      channel: "email",
+    },
+  }),
+  sendTestTelegram: () => request<NotificationDelivery>("/notifications", {
+    method: "POST",
+    body: {
+      notification_type: "upcoming_task",
+      subject: "AI Life test notification",
+      message: "Your AI Life Telegram notifications are configured correctly.",
+      channel: "telegram",
+    },
+  }),
+
   getAutomationPreferences: () =>
     request<AutomationPreferences>("/automation-preferences"),
   updateAutomationPreferences: (body: Partial<Omit<AutomationPreferences, "id" | "user_id" | "created_at" | "updated_at">>) =>
