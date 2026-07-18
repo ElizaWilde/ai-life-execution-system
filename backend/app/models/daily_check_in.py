@@ -37,6 +37,14 @@ class DailyCheckIn(Base):
             "sleep_hours >= 0 AND sleep_hours <= 24",
             name="ck_daily_check_ins_sleep",
         ),
+        CheckConstraint(
+            "available_minutes IS NULL OR (available_minutes >= 0 AND available_minutes <= 1440)",
+            name="ck_daily_check_ins_available_minutes",
+        ),
+        CheckConstraint(
+            "focus_mode IS NULL OR focus_mode IN ('Deep work', 'Meetings', 'Study', 'Recovery')",
+            name="ck_daily_check_ins_focus_mode",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -50,6 +58,8 @@ class DailyCheckIn(Base):
     mood_level: Mapped[str] = mapped_column(String(20))
     sleep_hours: Mapped[float]
     stress_level: Mapped[int | None]
+    available_minutes: Mapped[int | None]
+    focus_mode: Mapped[str | None] = mapped_column(String(20))
     notes: Mapped[str | None] = mapped_column(Text)
 
     cycle_day: Mapped[int | None]

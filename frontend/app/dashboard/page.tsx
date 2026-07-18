@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api, DailyTask, TodayDashboard, WeekDashboard } from "../../lib/api";
+import { subscribeToCheckInUpdates } from "../../lib/check-in-sync";
 import { loadAppSettings, orderByWeekStart, useAppSettings } from "../../lib/settings";
 
 type IconName =
@@ -16,6 +17,8 @@ type IconName =
   | "energy"
   | "smile"
   | "moon";
+
+type TimerMode = "focus" | "shortBreak" | "longBreak";
 
 function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -40,8 +43,15 @@ function formatDuration(minutes: number) {
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
+function dateKey(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function titleCase(value?: string | null) {
-  if (!value) return "Not set";
+  if (!value) return "-";
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
@@ -63,6 +73,9 @@ export default function DashboardPage() {
   const appSettings = useAppSettings();
   const focusMinutes = Math.max(1, Number(appSettings.focusMinutes) || 25);
   const focusDurationSeconds = focusMinutes * 60;
+  const shortBreakDurationSeconds = Math.max(1, Number(appSettings.shortBreak) || 5) * 60;
+  const longBreakDurationSeconds = Math.max(1, Number(appSettings.longBreak) || 15) * 60;
+  const cycleCount = Math.min(12, Math.max(1, Number(appSettings.cycleCount) || 4));
   const [today, setToday] = useState<TodayDashboard | null>(null);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
   const [error, setError] = useState("");
@@ -71,16 +84,23 @@ export default function DashboardPage() {
     return Math.max(1, savedMinutes) * 60;
   });
   const [timerRunning, setTimerRunning] = useState(false);
+  const [timerMode, setTimerMode] = useState<TimerMode>("focus");
+  const [completedFocusSessions, setCompletedFocusSessions] = useState(0);
 
   useEffect(() => {
-    Promise.all([api.getTodayDashboard(), api.getWeekDashboard()])
-      .then(([todayData, weekData]) => {
+    async function loadDashboard() {
+      try {
+        const [todayData, weekData] = await Promise.all([api.getTodayDashboard(), api.getWeekDashboard()]);
         setToday(todayData);
         setWeek(weekData);
-      })
-      .catch((reason: unknown) => {
+        setError("");
+      } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : "Failed to load dashboard");
-      });
+      }
+    }
+
+    loadDashboard();
+    return subscribeToCheckInUpdates(dateKey(new Date()), loadDashboard);
   }, []);
 
   useEffect(() => {
@@ -88,19 +108,30 @@ export default function DashboardPage() {
     const interval = window.setInterval(() => {
       setTimerSeconds((seconds) => {
         if (seconds <= 1) {
-          setTimerRunning(false);
-          return 0;
+          if (timerMode === "focus") {
+            const nextCompletedSessions = completedFocusSessions + 1;
+            const nextMode: TimerMode = nextCompletedSessions >= cycleCount ? "longBreak" : "shortBreak";
+            setCompletedFocusSessions(nextCompletedSessions);
+            setTimerMode(nextMode);
+            return nextMode === "longBreak" ? longBreakDurationSeconds : shortBreakDurationSeconds;
+          }
+
+          if (timerMode === "longBreak") setCompletedFocusSessions(0);
+          setTimerMode("focus");
+          return focusDurationSeconds;
         }
         return seconds - 1;
       });
     }, 1000);
     return () => window.clearInterval(interval);
-  }, [timerRunning, timerSeconds]);
+  }, [completedFocusSessions, cycleCount, focusDurationSeconds, longBreakDurationSeconds, shortBreakDurationSeconds, timerMode, timerRunning, timerSeconds]);
 
   useEffect(() => {
     setTimerRunning(false);
+    setTimerMode("focus");
+    setCompletedFocusSessions(0);
     setTimerSeconds(focusDurationSeconds);
-  }, [focusDurationSeconds]);
+  }, [cycleCount, focusDurationSeconds, longBreakDurationSeconds, shortBreakDurationSeconds]);
 
   const currentDate = useMemo(
     () => new Date(`${today?.date ?? new Date().toISOString().slice(0, 10)}T00:00:00`),
@@ -113,29 +144,42 @@ export default function DashboardPage() {
   const focusPoints = orderByWeekStart(week?.daily_focus ?? [], (point) => point.date, appSettings.weekStart);
   const maxFocus = Math.max(60, ...focusPoints.map((point) => point.focus_minutes));
   const tasks = today?.unfinished_tasks ?? [];
-  const suggestions = today?.coaching?.suggestions?.slice(0, 3) ?? [];
-  const coachingItems = [
-    { title: "Top priority", body: suggestions[0] ?? (tasks[0] ? `Focus on ${tasks[0].title}.` : "Choose one meaningful win."), icon: "spark" as const },
-    { title: "Deep work", body: suggestions[1] ?? "Protect a focused 60-minute block.", icon: "brain" as const },
-    { title: "Energy check", body: suggestions[2] ?? "Match the workload to your energy.", icon: "energy" as const },
-  ];
-  const timerProgress = timerSeconds / focusDurationSeconds;
+  const weekCalendar = useMemo(() => {
+    const firstDay = appSettings.weekStart === "Sunday" ? 0 : 1;
+    const start = new Date(currentDate);
+    start.setDate(start.getDate() - ((start.getDay() - firstDay + 7) % 7));
+    const pointsByDate = new Map((week?.daily_focus ?? []).map((point) => [point.date, point]));
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const key = dateKey(date);
+      const point = pointsByDate.get(key);
+      return {
+        date,
+        key,
+        isToday: key === dateKey(currentDate),
+        plannedMinutes: point?.planned_minutes ?? 0,
+        focusMinutes: point?.focus_minutes ?? 0,
+      };
+    });
+  }, [appSettings.weekStart, currentDate, week?.daily_focus]);
+  const timerDurationSeconds = timerMode === "focus"
+    ? focusDurationSeconds
+    : timerMode === "longBreak"
+      ? longBreakDurationSeconds
+      : shortBreakDurationSeconds;
+  const timerProgress = timerSeconds / timerDurationSeconds;
   const timerDisplay = `${String(Math.floor(timerSeconds / 60)).padStart(2, "0")}:${String(timerSeconds % 60).padStart(2, "0")}`;
   const timerCircumference = 2 * Math.PI * 72;
-  const timerArcLength = timerCircumference * 0.82;
-
-  function resetTimer() {
-    setTimerRunning(false);
-    setTimerSeconds(focusDurationSeconds);
-  }
 
   function toggleTimer() {
-    if (timerSeconds === 0) {
-      setTimerSeconds(focusDurationSeconds);
-      setTimerRunning(true);
-      return;
-    }
     setTimerRunning((running) => !running);
+  }
+
+  function restartTimer() {
+    setTimerRunning(false);
+    setTimerSeconds(timerDurationSeconds);
   }
 
   return (
@@ -189,30 +233,37 @@ export default function DashboardPage() {
                 cx="90"
                 cy="90"
                 r="72"
-                strokeDasharray={`${timerArcLength} ${timerCircumference}`}
-                strokeDashoffset={timerArcLength * (1 - timerProgress)}
+                strokeDasharray={timerCircumference}
+                strokeDashoffset={timerCircumference * (1 - timerProgress)}
               />
             </svg>
-            <div><strong>{timerDisplay}</strong><span>Focus Time</span></div>
+            <div><strong>{timerDisplay}</strong><span>{timerMode === "focus" ? "Focus Time" : timerMode === "longBreak" ? "Long Break" : "Short Break"}</span></div>
           </div>
-          <div className="timer-mode"><Icon name="brain" size={15} /> Deep Work <span>⌄</span></div>
+          <div className="timer-mode"><Icon name={timerMode === "focus" ? "brain" : "clock"} size={15} /> {timerMode === "focus" ? (today?.check_in?.focus_mode ?? "Deep work") : "Break"}</div>
           <div className="timer-actions">
             <button className="timer-toggle" onClick={toggleTimer} type="button">
-              <span>{timerRunning ? "Ⅱ" : "▶"}</span> {timerRunning ? "Pause" : timerSeconds === 0 ? "Restart" : "Start"}
+              <span>{timerRunning ? "Ⅱ" : "▶"}</span> {timerRunning ? "Pause" : "Start"}
             </button>
-            <button aria-label="Reset focus timer" className="timer-reset" onClick={resetTimer} type="button">■</button>
+            <button className="timer-restart" onClick={restartTimer} type="button">↻ Restart</button>
           </div>
         </article>
 
-        <article className="panel coach-panel">
-          <div className="panel-heading"><h2>AI Coach</h2><Link href="/check-in">View all</Link></div>
-          <div className="coach-list">
-            {coachingItems.map((item) => <Link className="coach-row" href="/check-in" key={item.title}><span><Icon name={item.icon} /></span><div><strong>{item.title}</strong><p>{item.body}</p></div><b>›</b></Link>)}
-          </div>
-        </article>
       </div>
 
       <div className="dashboard-bottom-grid">
+        <article className="panel schedule-panel">
+          <div className="panel-heading"><div><h2>Schedule</h2><span className="schedule-range">{weekCalendar[0].date.toLocaleDateString("en", { month: "short", day: "numeric" })} – {weekCalendar[6].date.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span></div><Link href="/weekly-plan">View plan</Link></div>
+          <div className="week-calendar">
+            {weekCalendar.map((day) => (
+              <article className={`week-calendar-day ${day.isToday ? "today" : ""}`} key={day.key}>
+                <header><span>{day.date.toLocaleDateString("en", { weekday: "short" })}</span><strong>{day.date.getDate()}</strong></header>
+                <div className={day.plannedMinutes ? "planned" : "open"}><b>{day.plannedMinutes ? formatDuration(day.plannedMinutes) : "Open"}</b><span>{day.plannedMinutes ? "planned" : "capacity"}</span></div>
+                <small>{day.focusMinutes ? `${formatDuration(day.focusMinutes)} focused` : "No focus logged"}</small>
+              </article>
+            ))}
+          </div>
+        </article>
+
         <article className="panel focus-panel">
           <div className="panel-heading"><h2>Focus</h2><span className="chart-key"><i /> Focus (h)</span></div>
           <div className="focus-chart">
@@ -227,26 +278,14 @@ export default function DashboardPage() {
           </div>
         </article>
 
-        <article className="panel schedule-panel">
-          <div className="panel-heading"><h2>Schedule</h2><Link href="/weekly-plan">View plan</Link></div>
-          <div className="schedule-list">
-            {focusPoints.slice(0, 4).map((point, index) => {
-              const pointDate = new Date(`${point.date}T00:00:00`);
-              return <div className="schedule-row" key={point.date}><time><b>{pointDate.toLocaleDateString("en", { weekday: "short" })}</b><span>{pointDate.toLocaleDateString("en", { month: "short", day: "numeric" })}</span></time><i className={`dot dot-${index}`} /><strong>{point.planned_minutes ? "Planned focus" : "Open capacity"}</strong><span>{formatDuration(point.planned_minutes)} planned</span></div>;
-            })}
-            {!focusPoints.length ? <p className="panel-empty">Weekly schedule will appear here.</p> : null}
-          </div>
-          <Link className="panel-more" href="/weekly-plan">+ Open weekly plan</Link>
-        </article>
-
         <article className="panel checkin-panel">
           <div className="panel-heading"><h2>Check-in</h2><Link href="/check-in">Edit</Link></div>
           <div className="checkin-list">
-            <div><span className="checkin-icon mood"><Icon name="smile" /></span><label>Mood</label><strong>{titleCase(today?.check_in?.mood_level)}</strong><b>{today?.readiness_score ? `${Math.round(today.readiness_score)}/100` : "—"}</b></div>
-            <div><span className="checkin-icon energy"><Icon name="energy" /></span><label>Energy</label><strong>{titleCase(today?.check_in?.energy_level)}</strong><b>{titleCase(today?.workload_level)}</b></div>
-            <div><span className="checkin-icon sleep"><Icon name="moon" /></span><label>Sleep</label><strong>{today?.check_in ? `${today.check_in.sleep_hours}h` : "Not set"}</strong><b>{today?.check_in && today.check_in.sleep_hours >= 7 ? "Good" : "—"}</b></div>
+            <div><span className="checkin-icon mood"><Icon name="smile" /></span><label>Mood</label><strong>{today?.check_in ? titleCase(today.check_in.mood_level) : ""}</strong><b>{today?.check_in && today.readiness_score !== null ? `${Math.round(today.readiness_score)}/100` : "-"}</b></div>
+            <div><span className="checkin-icon energy"><Icon name="energy" /></span><label>Energy</label><strong>{today?.check_in ? titleCase(today.check_in.energy_level) : ""}</strong><b>{today?.check_in && today.workload_level ? titleCase(today.workload_level) : "-"}</b></div>
+            <div><span className="checkin-icon sleep"><Icon name="moon" /></span><label>Sleep</label><strong>{today?.check_in ? `${today.check_in.sleep_hours}h` : ""}</strong><b>{today?.check_in ? (today.check_in.sleep_hours >= 7 ? "Good" : "-") : "-"}</b></div>
           </div>
-          <div className="coach-note"><Icon name="spark" size={17} /> {today?.coaching?.summary ?? "Check in to get a personalized coaching note."}</div>
+          {today?.coaching?.summary ? <div className="coach-note"><Icon name="spark" size={17} /> {today.coaching.summary}</div> : null}
         </article>
       </div>
     </section>

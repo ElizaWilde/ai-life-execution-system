@@ -20,6 +20,7 @@ def _to_read(setting: UserAppSetting) -> UserAppSettingRead:
         focus_minutes=setting.focus_minutes,
         short_break_minutes=setting.short_break_minutes,
         long_break_minutes=setting.long_break_minutes,
+        cycle_count=setting.cycle_count,
         workload=setting.workload,
         theme=setting.theme,
         tone=setting.tone,

@@ -32,6 +32,7 @@ export type UserAppSettings = {
   focus_minutes: 25 | 45 | 60;
   short_break_minutes: 5 | 10;
   long_break_minutes: 15 | 30;
+  cycle_count: number;
   workload: "light" | "medium" | "high";
   theme: "light" | "dark" | "auto";
   tone: "supportive" | "direct" | "reflective";
@@ -147,6 +148,8 @@ export type DailyCheckIn = {
   mood_level: MoodLevel;
   sleep_hours: number;
   stress_level: number | null;
+  available_minutes: number | null;
+  focus_mode: "Deep work" | "Meetings" | "Study" | "Recovery" | null;
   notes: string | null;
   cycle_day: number | null;
   cycle_notes: string | null;
@@ -334,6 +337,8 @@ export const api = {
     mood_level: MoodLevel;
     sleep_hours: number;
     stress_level?: number | null;
+    available_minutes?: number | null;
+    focus_mode?: "Deep work" | "Meetings" | "Study" | "Recovery" | null;
     notes?: string | null;
     cycle_day?: number | null;
     cycle_notes?: string | null;

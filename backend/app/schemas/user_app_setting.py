@@ -12,6 +12,7 @@ class UserAppSettingFields(BaseModel):
     focus_minutes: Literal[25, 45, 60] = 25
     short_break_minutes: Literal[5, 10] = 5
     long_break_minutes: Literal[15, 30] = 15
+    cycle_count: int = Field(default=4, ge=1, le=12)
     workload: Literal["light", "medium", "high"] = "medium"
     theme: Literal["light", "dark", "auto"] = "light"
     tone: Literal["supportive", "direct", "reflective"] = "supportive"

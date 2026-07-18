@@ -5,6 +5,7 @@ def test_get_app_settings_creates_defaults(client, user_headers):
     data = response.json()
     assert data["week_start"] == "Monday"
     assert data["focus_minutes"] == 25
+    assert data["cycle_count"] == 4
     assert data["theme"] == "light"
     assert data["proactive"] is True
     assert data["integrations"] == []
@@ -17,6 +18,7 @@ def test_update_app_settings_persists_full_page_preferences(client, user_headers
         "focus_minutes": 45,
         "short_break_minutes": 10,
         "long_break_minutes": 30,
+        "cycle_count": 6,
         "workload": "high",
         "theme": "dark",
         "tone": "direct",
@@ -60,6 +62,16 @@ def test_invalid_app_setting_is_rejected(client, user_headers):
             "integrations": [],
             "avatar_data_url": None,
         },
+    )
+
+    assert response.status_code == 422
+
+
+def test_invalid_cycle_count_is_rejected(client, user_headers):
+    response = client.put(
+        "/app-settings/me",
+        headers=user_headers,
+        json={"cycle_count": 0},
     )
 
     assert response.status_code == 422

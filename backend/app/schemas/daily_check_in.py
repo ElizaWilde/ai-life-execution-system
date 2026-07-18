@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 EnergyLevel = Literal["depleted", "low", "steady", "high", "energized"]
 MoodLevel = Literal["struggling", "low", "neutral", "good", "great"]
+FocusMode = Literal["Deep work", "Meetings", "Study", "Recovery"]
 
 
 class DailyCheckInBase(BaseModel):
@@ -14,6 +15,8 @@ class DailyCheckInBase(BaseModel):
     sleep_hours: float = Field(ge=0, le=24)
 
     stress_level: int | None = Field(default=None, ge=1, le=5)
+    available_minutes: int | None = Field(default=None, ge=0, le=1440)
+    focus_mode: FocusMode | None = None
     notes: str | None = Field(default=None, max_length=2000)
 
     cycle_day: int | None = Field(default=None, ge=1, le=100)
@@ -30,6 +33,8 @@ class DailyCheckInUpdate(BaseModel):
     sleep_hours: float | None = Field(default=None, ge=0, le=24)
 
     stress_level: int | None = Field(default=None, ge=1, le=5)
+    available_minutes: int | None = Field(default=None, ge=0, le=1440)
+    focus_mode: FocusMode | None = None
     notes: str | None = Field(default=None, max_length=2000)
 
     cycle_day: int | None = Field(default=None, ge=1, le=100)

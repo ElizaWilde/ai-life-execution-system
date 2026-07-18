@@ -8,6 +8,7 @@ export type AppSettings = {
   focusMinutes: string;
   shortBreak: string;
   longBreak: string;
+  cycleCount: string;
   workload: string;
   theme: "light" | "dark" | "auto";
   tone: string;
@@ -31,6 +32,7 @@ export const defaultSettings: AppSettings = {
   focusMinutes: "25",
   shortBreak: "5",
   longBreak: "15",
+  cycleCount: "4",
   workload: "medium",
   theme: "light",
   tone: "supportive",

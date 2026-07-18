@@ -27,6 +27,7 @@ class UserAppSetting(Base):
         CheckConstraint("focus_minutes IN (25, 45, 60)", name="ck_user_app_settings_focus_minutes"),
         CheckConstraint("short_break_minutes IN (5, 10)", name="ck_user_app_settings_short_break"),
         CheckConstraint("long_break_minutes IN (15, 30)", name="ck_user_app_settings_long_break"),
+        CheckConstraint("cycle_count BETWEEN 1 AND 12", name="ck_user_app_settings_cycle_count"),
         CheckConstraint("workload IN ('light', 'medium', 'high')", name="ck_user_app_settings_workload"),
         CheckConstraint("theme IN ('light', 'dark', 'auto')", name="ck_user_app_settings_theme"),
         CheckConstraint("tone IN ('supportive', 'direct', 'reflective')", name="ck_user_app_settings_tone"),
@@ -43,6 +44,7 @@ class UserAppSetting(Base):
     focus_minutes: Mapped[int] = mapped_column(Integer, default=25)
     short_break_minutes: Mapped[int] = mapped_column(Integer, default=5)
     long_break_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    cycle_count: Mapped[int] = mapped_column(Integer, default=4)
     workload: Mapped[str] = mapped_column(String(10), default="medium")
     theme: Mapped[str] = mapped_column(String(10), default="light")
     tone: Mapped[str] = mapped_column(String(20), default="supportive")

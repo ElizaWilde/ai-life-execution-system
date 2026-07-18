@@ -13,6 +13,8 @@ def test_create_check_in_uses_authenticated_user_defaults_today_and_returns_save
             "mood_level": "neutral",
             "sleep_hours": 7.5,
             "stress_level": 2,
+            "available_minutes": 360,
+            "focus_mode": "Deep work",
         },
     )
 
@@ -24,6 +26,8 @@ def test_create_check_in_uses_authenticated_user_defaults_today_and_returns_save
     assert body["energy_level"] == "steady"
     assert body["mood_level"] == "neutral"
     assert body["sleep_hours"] == 7.5
+    assert body["available_minutes"] == 360
+    assert body["focus_mode"] == "Deep work"
     assert body["created_at"] is not None
     assert body["updated_at"] is not None
 
