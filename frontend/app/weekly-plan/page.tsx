@@ -10,19 +10,18 @@ import {
   WeekDashboard,
   WeeklyGoal,
 } from "../../lib/api";
-import { orderByWeekStart, useAppSettings, workloadMinutes } from "../../lib/settings";
 
-type PlanIconName = "spark" | "clock" | "check" | "alert" | "calendar" | "refresh" | "arrow";
+type PlanIconName = "spark" | "calendar" | "chart" | "check" | "arrow" | "plus" | "target";
 
 function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
   const paths: Record<PlanIconName, React.ReactNode> = {
     spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
-    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
-    alert: <><path d="M10.3 3.8 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></>,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
-    refresh: <><path d="M20 7v5h-5" /><path d="M19 12a7 7 0 1 1-2-5" /></>,
+    chart: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /></>,
+    check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
     arrow: <path d="M5 12h14M15 8l4 4-4 4" />,
+    plus: <path d="M12 5v14M5 12h14" />,
+    target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><path d="M12 8V5" /></>,
   };
   return <svg aria-hidden="true" className="plan-icon" fill="none" height={size} viewBox="0 0 24 24" width={size}>{paths[name]}</svg>;
 }
@@ -32,54 +31,58 @@ function localToday() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
-function dateAt(date: string) {
-  return new Date(`${date}T00:00:00`);
+// Keep all week-scoped requests anchored to the week selected in the UI.
+function dateAt(value: string) {
+  return new Date(`${value}T00:00:00`);
 }
 
-function addDays(date: string, days: number) {
-  const value = dateAt(date);
-  value.setDate(value.getDate() + days);
-  return value.toISOString().slice(0, 10);
+function addDays(value: string, days: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
-function formatMinutes(minutes: number) {
-  if (!minutes) return "0h";
+function formatHours(minutes: number) {
   const hours = minutes / 60;
   return `${hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)}h`;
 }
 
-function taskRisk(tasks: DailyTask[]) {
-  return tasks.filter((task) => task.priority === "high" && task.status !== "completed").length;
+function isoWeek(value: string) {
+  const date = dateAt(value);
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+}
+
+function taskRank(priority: Priority) {
+  return priority === "high" ? 3 : priority === "medium" ? 2 : 1;
 }
 
 export default function WeeklyPlanPage() {
-  const appSettings = useAppSettings();
+  const [weekAnchor, setWeekAnchor] = useState(localToday());
   const [goals, setGoals] = useState<WeeklyGoal[]>([]);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
   const [days, setDays] = useState<TodayDashboard[]>([]);
   const [activeTab, setActiveTab] = useState<"weekly" | "phase">("weekly");
-  const [showGoalForm, setShowGoalForm] = useState(false);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const [goalTitle, setGoalTitle] = useState("");
-  const [goalDescription, setGoalDescription] = useState("");
-  const [goalPriority, setGoalPriority] = useState<Priority>("high");
-  const [goalMinutes, setGoalMinutes] = useState("300");
   const [taskTitle, setTaskTitle] = useState("");
-  const [taskDate, setTaskDate] = useState(localToday());
-  const [taskMinutes, setTaskMinutes] = useState("30");
-  const [taskPriority, setTaskPriority] = useState<Priority>("medium");
+  const [taskHours, setTaskHours] = useState("1");
+  const [taskPriority, setTaskPriority] = useState<Priority>("high");
 
-  async function loadPlan() {
+  async function loadPlan(anchor: string) {
+    setLoading(true);
     setError("");
     try {
       const [goalData, weekData] = await Promise.all([
-        api.getCurrentGoals(),
-        api.getWeekDashboard(),
+        api.getGoalsForWeek(anchor),
+        api.getWeekDashboard(anchor),
       ]);
       const dailyData = await Promise.all(
         Array.from({ length: 7 }, (_, index) => api.getDayDashboard(addDays(weekData.week_start, index))),
@@ -87,7 +90,6 @@ export default function WeeklyPlanPage() {
       setGoals(goalData);
       setWeek(weekData);
       setDays(dailyData);
-      setTaskDate((current) => current || weekData.week_start);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to load weekly plan");
     } finally {
@@ -96,104 +98,85 @@ export default function WeeklyPlanPage() {
   }
 
   useEffect(() => {
-    loadPlan();
+    loadPlan(weekAnchor);
   }, []);
 
-  const weekLabel = useMemo(() => {
-    if (!week) return "This week";
-    const start = dateAt(week.week_start);
-    const end = dateAt(week.week_end);
-    return `${start.toLocaleDateString("en", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}`;
-  }, [week]);
-
-  const completion = Math.round((week?.completion_rate ?? 0) * 100);
+  const allTasks = useMemo(
+    () => days.flatMap((day) => day.unfinished_tasks).sort((left, right) =>
+      taskRank(right.priority) - taskRank(left.priority) ||
+      left.task_date.localeCompare(right.task_date) ||
+      left.id - right.id,
+    ),
+    [days],
+  );
+  const priorities = allTasks.slice(0, 6);
+  const highPriorityCount = allTasks.filter((task) => task.priority === "high").length;
+  const plannedMinutes = week?.daily_focus.reduce((sum, point) => sum + point.planned_minutes, 0) ?? 0;
   const targetMinutes = goals.reduce((sum, goal) => sum + (goal.target_minutes ?? 0), 0);
-  const totalAtRisk = days.reduce((sum, day) => sum + taskRisk(day.unfinished_tasks), 0);
-  const topTasks = days.flatMap((day) => day.unfinished_tasks).sort((a, b) => {
-    const rank = { high: 3, medium: 2, low: 1 };
-    return rank[b.priority] - rank[a.priority];
-  }).slice(0, 3);
-  const chartMax = Math.max(60, ...(week?.daily_focus.map((point) => point.focus_minutes) ?? [60]));
-  const displayedDays = orderByWeekStart(days, (day) => day.date, appSettings.weekStart);
-  const displayedFocus = orderByWeekStart(week?.daily_focus ?? [], (point) => point.date, appSettings.weekStart);
-  const todayData = days.find((day) => day.date === localToday());
+  const completion = Math.round((week?.completion_rate ?? 0) * 100);
+  const planVsGoal = targetMinutes ? Math.round((plannedMinutes / targetMinutes) * 100) : 0;
+  const weekLabel = week
+    ? `${dateAt(week.week_start).toLocaleDateString("en", { month: "short", day: "numeric" })} – ${dateAt(week.week_end).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })} (Week ${isoWeek(week.week_start)})`
+    : "Loading week…";
+  const suggestion = highPriorityCount > 3
+    ? `You have ${highPriorityCount} high-impact priorities. Complete the first ${Math.min(3, highPriorityCount)} before adding more work.`
+    : plannedMinutes > targetMinutes && targetMinutes > 0
+      ? `This plan is ${formatHours(plannedMinutes - targetMinutes)} above your weekly goal. Move one lower-impact item into the buffer.`
+      : "The week has room for focused work. Protect your strongest mornings for the first priorities.";
 
-  async function generatePlan() {
-    setBusy(true);
-    setError("");
+  async function selectWeek(anchor: string) {
     setMessage("");
-    try {
-      await api.generatePlan({ available_minutes: workloadMinutes(appSettings.workload), task_date: localToday() });
-      setMessage("Today’s AI plan was regenerated from your active weekly goals.");
-      await loadPlan();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to generate plan");
-    } finally {
-      setBusy(false);
-    }
+    setWeekAnchor(anchor);
+    await loadPlan(anchor);
   }
 
-  async function createGoal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!week) return;
-    setBusy(true);
-    try {
-      await api.createGoal({
-        title: goalTitle,
-        description: goalDescription || null,
-        week_start: week.week_start,
-        week_end: week.week_end,
-        priority: goalPriority,
-        target_minutes: goalMinutes ? Number(goalMinutes) : null,
-      });
-      setGoalTitle("");
-      setGoalDescription("");
-      setShowGoalForm(false);
-      await loadPlan();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to create weekly goal");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function completeGoal(goal: WeeklyGoal) {
-    setBusy(true);
-    try {
-      await api.updateGoal(goal.id, { status: "completed" });
-      await loadPlan();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to update goal");
-    } finally {
-      setBusy(false);
-    }
+  async function moveWeek(offset: number) {
+    await selectWeek(addDays(week?.week_start ?? weekAnchor, offset * 7));
   }
 
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!week) return;
+    const today = localToday();
+    const taskDate = today >= week.week_start && today <= week.week_end ? today : week.week_start;
     setBusy(true);
     try {
       await api.createTask({
         title: taskTitle,
         task_date: taskDate,
-        estimated_minutes: taskMinutes ? Number(taskMinutes) : null,
+        estimated_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null,
         priority: taskPriority,
+        weekly_goal_id: goals.find((goal) => goal.status === "active")?.id ?? null,
         source: "manual",
       });
       setTaskTitle("");
       setShowTaskForm(false);
-      await loadPlan();
+      setMessage("Priority added to the weekly plan.");
+      await loadPlan(weekAnchor);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to create task");
+      setError(reason instanceof Error ? reason.message : "Failed to add priority");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeTask(task: DailyTask) {
+    setBusy(true);
+    try {
+      await api.updateTask(task.id, { status: "completed" });
+      setMessage(`Completed: ${task.title}`);
+      await loadPlan(weekAnchor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to complete priority");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="plans-page">
+    <section className="plans-page weekly-reference-page">
       <header className="plans-header">
-        <div><h1>Plans</h1><p>Plan your weeks and phases. Stay aligned with your bigger goals.</p></div>
+        <div><h1>Weekly Plan</h1><p>Stay aligned with your goals. Adjust on the day, guided by AI.</p></div>
         <div className="plans-header-actions">
           <Link aria-label="Open calendar" href="/today"><PlanIcon name="calendar" size={20} /></Link>
           <Link className="plans-coach-button" href="/check-in"><PlanIcon name="spark" /> Ask my coach <span>⌄</span></Link>
@@ -201,8 +184,8 @@ export default function WeeklyPlanPage() {
       </header>
 
       <div className="plans-tabs" role="tablist">
-        <button className={activeTab === "weekly" ? "active" : ""} onClick={() => setActiveTab("weekly")} role="tab" type="button">Weekly Plan</button>
-        <button className={activeTab === "phase" ? "active" : ""} onClick={() => setActiveTab("phase")} role="tab" type="button">Phase Plan</button>
+        <button aria-selected={activeTab === "weekly"} className={activeTab === "weekly" ? "active" : ""} onClick={() => setActiveTab("weekly")} role="tab" type="button">Weekly Plan</button>
+        <button aria-selected={activeTab === "phase"} className={activeTab === "phase" ? "active" : ""} onClick={() => setActiveTab("phase")} role="tab" type="button">Phase Plan</button>
       </div>
 
       {error ? <div className="error plans-feedback">{error}</div> : null}
@@ -210,100 +193,70 @@ export default function WeeklyPlanPage() {
 
       {activeTab === "phase" ? (
         <div className="phase-plan-view">
-          <div><p className="eyebrow">Phase plan</p><h2>Build the next phase from weekly outcomes</h2><p>Use your active goals as the foundation for a longer planning cycle.</p></div>
-          <button className="outline-purple" onClick={() => setShowGoalForm(true)} type="button">+ Add phase goal</button>
+          <div><p className="eyebrow">Phase plan</p><h2>Build the next phase from weekly outcomes</h2><p>Use completed weeks as the foundation for your next longer planning cycle.</p></div>
+          <button className="outline-purple" onClick={() => setActiveTab("weekly")} type="button">Return to weekly plan</button>
         </div>
       ) : (
-        <div className="plans-layout">
-          <main className="weekly-plan-main">
-            <section className="plan-card glance-card">
-              <div className="glance-heading"><h2>This Week at a Glance</h2><span>{weekLabel}</span></div>
-              <div className="glance-content">
-                <div className="glance-stats">
-                  <div><span>Weekly Goal</span><strong>{targetMinutes ? formatMinutes(targetMinutes) : "—"}</strong><small>Focus time</small></div>
-                  <div><span>Progress</span><strong>{completion}%</strong><small className="positive">↑ {week?.completed_tasks ?? 0} completed</small></div>
-                  <div><span>Completed Tasks</span><strong>{week?.completed_tasks ?? 0} / {week?.planned_tasks ?? 0}</strong></div>
-                  <div><span>At-Risk Tasks</span><strong className="danger-number">{totalAtRisk}</strong></div>
-                </div>
-                <div className="weekly-mini-chart">
-                  <div className="mini-chart-key"><span><i /> Focus Time</span><span className="goal-key">Goal: {targetMinutes ? formatMinutes(targetMinutes) : "—"}</span></div>
-                  <div className="mini-chart-body">
-                    <div className="mini-axis"><span>10h</span><span>5h</span><span>0h</span></div>
-                    <div className="mini-bars">
-                      {displayedFocus.map((point) => <div key={point.date}><span style={{ height: `${Math.max(3, point.focus_minutes / chartMax * 100)}%` }} /><small>{dateAt(point.date).toLocaleDateString("en", { weekday: "short" })}</small></div>)}
-                    </div>
+        <main className="weekly-reference-content">
+          <nav aria-label="Select week" className="week-selector">
+            <div>
+              <button aria-label="Previous week" disabled={loading} onClick={() => moveWeek(-1)} type="button">‹</button>
+              <button aria-label="Next week" disabled={loading} onClick={() => moveWeek(1)} type="button">›</button>
+              <PlanIcon name="calendar" size={15} />
+              <strong>{weekLabel}</strong>
+              <button aria-label="Go to current week" disabled={loading || weekAnchor === localToday()} onClick={() => selectWeek(localToday())} type="button">Today</button>
+            </div>
+            <Link className="outline-purple" href="/weekly-review"><PlanIcon name="chart" /> This Week&apos;s Review</Link>
+          </nav>
+
+          <section className="plan-card week-overview-card">
+            <h2>This Week Overview</h2>
+            <div className="week-overview-grid">
+              <div><span>Weekly Goal</span><strong>{targetMinutes ? formatHours(targetMinutes) : "—"}</strong><small>Focus time</small></div>
+              <div><span>Planned Focus</span><strong>{formatHours(plannedMinutes)}</strong><small>{targetMinutes ? `${planVsGoal}% of goal` : "Set a goal below"}</small></div>
+              <div><span>Tasks</span><strong>{week?.planned_tasks ?? 0}</strong><small>Planned</small></div>
+              <div><span>Priority Tasks</span><strong>{highPriorityCount}</strong><small>High impact</small></div>
+              <div className="overview-progress">
+                <i style={{ background: `conic-gradient(#24a84b ${completion * 3.6}deg, #e7eee8 0deg)` }}><b>{completion}%</b></i>
+                <span><strong>Overall Progress</strong><small>{week?.completed_tasks ?? 0} of {week?.planned_tasks ?? 0} completed</small></span>
+              </div>
+            </div>
+          </section>
+
+          <section className="plan-card key-priorities-card">
+            <div className="priority-section-heading">
+              <div><h2><PlanIcon name="target" /> Key Priorities This Week</h2><p>Focus on what matters most. Check items off as you finish.</p></div>
+            </div>
+            <div className="priority-content-grid">
+              <div className="reference-priority-list">
+                {loading ? <p>Loading priorities…</p> : null}
+                {!loading && priorities.length === 0 ? <p>No priorities yet. Add the first meaningful task for this week.</p> : null}
+                {priorities.map((task, index) => (
+                  <div key={task.id}>
+                    <button aria-label={`Complete ${task.title}`} disabled={busy} onClick={() => completeTask(task)} type="button">{index + 1}</button>
+                    <span>{task.title}</span>
+                    <b className={task.priority}>{task.priority}</b>
+                    <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
                   </div>
-                </div>
+                ))}
+                <button className="add-priority-button" onClick={() => setShowTaskForm((show) => !show)} type="button"><PlanIcon name="plus" size={14} /> Add Priority</button>
               </div>
-            </section>
+              <aside className="weekly-ai-suggestion">
+                <h3><PlanIcon name="spark" /> AI Suggestion</h3>
+                <p>{suggestion}</p>
+                <Link href="/check-in">View Details <PlanIcon name="arrow" size={14} /></Link>
+              </aside>
+            </div>
 
-            <section className="plan-card week-table-card">
-              <div className="plan-toolbar">
-                <div><button className="outline-purple" disabled={busy} onClick={generatePlan} type="button"><PlanIcon name="spark" /> {busy ? "Working…" : "Regenerate Plan with AI"}</button><span>Uses today’s capacity and weekly goals</span></div>
-                <Link className="outline-neutral" href="/today"><PlanIcon name="refresh" /> Adjust Unfinished Tasks</Link>
-              </div>
-
-              <div className="week-table">
-                <div className="week-table-header"><span>Day</span><span>Focus Goal</span><span>Key Tasks</span><span>Progress</span><span /></div>
-                {loading ? <p className="plan-loading">Loading your week…</p> : null}
-                {displayedDays.map((day) => {
-                  const point = week?.daily_focus.find((item) => item.date === day.date);
-                  const progress = Math.round(day.completion_rate * 100);
-                  const risks = taskRisk(day.unfinished_tasks);
-                  const date = dateAt(day.date);
-                  return <div className={`week-day-row ${day.date === localToday() ? "today" : ""}`} key={day.date}>
-                    <time><b>{date.toLocaleDateString("en", { weekday: "short" })}</b><span>{date.toLocaleDateString("en", { month: "short", day: "numeric" })}</span></time>
-                    <div className="day-focus"><strong>{formatMinutes(point?.focus_minutes ?? day.focus_minutes)}</strong><span>of {formatMinutes(point?.planned_minutes ?? 0)}</span></div>
-                    <div className="day-tasks">
-                      {day.unfinished_tasks.slice(0, 2).map((task) => <span key={task.id}>• {task.title}</span>)}
-                      {!day.unfinished_tasks.length ? <span className="empty-task">No scheduled tasks</span> : null}
-                    </div>
-                    <div className="day-progress"><div><i className={progress >= 75 ? "green" : progress >= 40 ? "amber" : "gray"} style={{ width: `${progress}%` }} /></div><span>{progress}%</span>{risks ? <b>{risks} at risk</b> : null}</div>
-                    <span className="row-chevron">⌄</span>
-                  </div>;
-                })}
-              </div>
-
-              {showTaskForm ? (
-                <form className="inline-plan-form" onSubmit={createTask}>
-                  <input className="input" placeholder="Task title" required value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
-                  <input className="input" type="date" min={week?.week_start} max={week?.week_end} value={taskDate} onChange={(event) => setTaskDate(event.target.value)} />
-                  <input className="input" min="0" type="number" value={taskMinutes} onChange={(event) => setTaskMinutes(event.target.value)} />
-                  <select className="input" value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
-                  <button className="outline-purple" disabled={busy} type="submit">Add task</button>
-                  <button className="form-cancel" onClick={() => setShowTaskForm(false)} type="button">Cancel</button>
-                </form>
-              ) : <button className="add-week-task" onClick={() => setShowTaskForm(true)} type="button">＋ Add Task to Week</button>}
-            </section>
-          </main>
-
-          <aside className="plan-side-column">
-            <section className="plan-card summary-card"><h3>Weekly Summary</h3><div className="summary-list">
-              <div><i className="purple"><PlanIcon name="clock" /></i><span>Total Focus Time</span><strong>{formatMinutes(week?.focus_minutes ?? 0)} <small>/ {targetMinutes ? formatMinutes(targetMinutes) : "—"}</small></strong></div>
-              <div><i className="blue"><PlanIcon name="check" /></i><span>Completion Rate</span><strong>{completion}%</strong></div>
-              <div><i className="green"><PlanIcon name="check" /></i><span>Tasks Completed</span><strong>{week?.completed_tasks ?? 0} / {week?.planned_tasks ?? 0}</strong></div>
-              <div><i className="red"><PlanIcon name="alert" /></i><span>At-Risk Tasks</span><strong>{totalAtRisk}</strong></div>
-              <div><i className="orange"><PlanIcon name="alert" /></i><span>Overdue Tasks</span><strong>0</strong></div>
-            </div></section>
-
-            <section className="plan-card priorities-card"><h3>Top Priorities This Week</h3><div className="priority-list">
-              {(topTasks.length ? topTasks.map((task) => task.title) : goals.map((goal) => goal.title)).slice(0, 3).map((title, index) => <div key={`${title}-${index}`}><b>{index + 1}</b><span>{title}</span></div>)}
-              {!topTasks.length && !goals.length ? <p>No priorities yet.</p> : null}
-            </div><button className="outline-purple" onClick={() => setShowGoalForm((show) => !show)} type="button">Manage Priorities</button></section>
-
-            {showGoalForm ? <section className="plan-card goal-form-card"><h3>Create Weekly Goal</h3><form className="compact-goal-form" onSubmit={createGoal}>
-              <input className="input" placeholder="Goal title" required value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} />
-              <textarea className="input" placeholder="Description" rows={2} value={goalDescription} onChange={(event) => setGoalDescription(event.target.value)} />
-              <div><input className="input" min="0" type="number" value={goalMinutes} onChange={(event) => setGoalMinutes(event.target.value)} /><select className="input" value={goalPriority} onChange={(event) => setGoalPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
-              <button className="outline-purple" disabled={busy} type="submit">Create goal</button>
-            </form>
-            {goals.map((goal) => <div className="goal-manage-row" key={goal.id}><span>{goal.title}</span><button disabled={busy} onClick={() => completeGoal(goal)} type="button">Complete</button></div>)}</section> : null}
-
-            <section className="plan-card insight-card"><h3><PlanIcon name="spark" /> AI Coach Insight</h3><p>{todayData?.coaching?.summary ?? (totalAtRisk ? `You have ${totalAtRisk} at-risk tasks this week. Protect focused time for the highest-priority work.` : "Your week is balanced. Keep protecting focused time for your top priorities.")}</p><Link className="outline-purple" href="/check-in">View Recommendations <PlanIcon name="arrow" /></Link></section>
-
-            <section className="plan-card next-week-card"><div><h3>Next Week</h3><span>Draft is ready</span></div><p>Build next week from this week’s progress and your active goals.</p><Link className="outline-purple" href="/review">Preview Next Week <PlanIcon name="arrow" /></Link></section>
-          </aside>
-        </div>
+            {showTaskForm ? <form className="reference-task-form" onSubmit={createTask}>
+              <input maxLength={255} placeholder="Priority title" required value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
+              <input aria-label="Estimated hours" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} />
+              <select aria-label="Priority level" value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+              <button disabled={busy} type="submit">Save priority</button>
+              <button onClick={() => setShowTaskForm(false)} type="button">Cancel</button>
+            </form> : null}
+          </section>
+        </main>
       )}
     </section>
   );

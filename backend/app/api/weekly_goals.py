@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,32 @@ from app.schemas.weekly_goal import (
 
 
 router = APIRouter()
+
+
+@router.get("", response_model=list[WeeklyGoalRead])
+def get_weekly_goals(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    target_date: Annotated[
+        date | None,
+        Query(alias="date", description="Any date in the week to load."),
+    ] = None,
+) -> list[WeeklyGoal]:
+    selected = target_date or date.today()
+    week_start = selected - timedelta(days=selected.weekday())
+    week_end = week_start + timedelta(days=6)
+    return list(
+        db.scalars(
+            select(WeeklyGoal)
+            .where(
+                WeeklyGoal.user_id == user.id,
+                WeeklyGoal.week_start <= week_end,
+                WeeklyGoal.week_end >= week_start,
+                WeeklyGoal.status != "cancelled",
+            )
+            .order_by(WeeklyGoal.priority.desc(), WeeklyGoal.id)
+        )
+    )
 
 
 @router.post("", response_model=WeeklyGoalRead, status_code=status.HTTP_201_CREATED)

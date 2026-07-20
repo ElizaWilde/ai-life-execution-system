@@ -1,5 +1,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from app.models import AutomationPreference, DailyTask, Notification
@@ -54,6 +56,27 @@ def add_preferences(*, automatic_rescheduling_enabled: bool = False) -> None:
             )
         )
         db.commit()
+
+
+def test_apscheduler_registers_each_automation_as_an_interval_job():
+    provider = RecordingProvider()
+    automation = make_scheduler(provider)
+    scheduler = automation.build_apscheduler(
+        first_run_time=datetime(2026, 7, 20, tzinfo=timezone.utc)
+    )
+
+    jobs = scheduler.get_jobs()
+
+    assert isinstance(scheduler, BlockingScheduler)
+    assert {job.id for job in jobs} == {
+        "due_reminders",
+        "morning_evening",
+        "overdue_tasks",
+        "procrastination",
+        "completion_forecasts",
+        "rescheduling_proposals",
+    }
+    assert all(isinstance(job.trigger, IntervalTrigger) for job in jobs)
 
 
 def test_morning_notification_is_generated_once_across_repeated_cycles():

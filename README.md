@@ -91,7 +91,7 @@ The system uses several types of memory:
 | Database             | PostgreSQL                                   |
 | Vector Memory        | pgvector                                     |
 | Cache                | Redis                                        |
-| Scheduler            | Dedicated Python worker                      |
+| Scheduler            | APScheduler 3.x dedicated worker             |
 | Knowledge Management | Notion API                                   |
 | Calendar             | Google Calendar API                          |
 | Notifications        | Telegram, Discord, Email, Push Notifications |
@@ -130,7 +130,7 @@ are available at `http://localhost:8000/docs`.
 
 ## Background Automation Scheduler
 
-The scheduler runs as a separate Docker service, not inside FastAPI. It checks due
+APScheduler runs as a separate Docker service, not inside FastAPI. It checks due
 notifications, overdue work, procrastination signals, completion forecasts,
 rescheduling proposals, and users' morning/evening notification times.
 
@@ -147,10 +147,12 @@ Inspect scheduler activity with:
 docker compose logs -f scheduler
 ```
 
-`SCHEDULER_POLL_SECONDS` controls the polling interval. Generated notifications
-have database-backed deduplication keys, and PostgreSQL advisory locking prevents
-two scheduler replicas from executing the same cycle. Rescheduling jobs only send
-proposals; they never modify task dates without confirmation.
+`SCHEDULER_POLL_SECONDS` controls each APScheduler interval trigger. Jobs coalesce
+missed runs, allow only one instance, and execute serially in the worker. Generated
+notifications have database-backed deduplication keys, and PostgreSQL advisory
+locking prevents two scheduler replicas from executing the same operation.
+Rescheduling jobs only send proposals; they never modify task dates without
+confirmation.
 
 ## Execution Loop
 

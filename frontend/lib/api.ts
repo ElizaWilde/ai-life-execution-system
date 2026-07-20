@@ -80,6 +80,16 @@ export type NotificationDelivery = {
   delivered_at: string | null;
 };
 
+export type ParkedThought = {
+  id: number;
+  user_id: number;
+  content: string;
+  completed: boolean;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type WeeklyGoal = {
   id: number;
   user_id: number;
@@ -266,6 +276,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new Error(detail);
   }
 
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -301,6 +312,7 @@ export const api = {
     request<AutomationPreferences>("/automation-preferences", { method: "PATCH", body }),
 
   getCurrentGoals: () => request<WeeklyGoal[]>("/weekly-goals/current"),
+  getGoalsForWeek: (date: string) => request<WeeklyGoal[]>(`/weekly-goals?date=${date}`),
   createGoal: (body: {
     title: string;
     description?: string | null;
@@ -324,6 +336,14 @@ export const api = {
   }) => request<DailyTask>("/daily-tasks", { method: "POST", body }),
   updateTask: (id: number, body: Partial<DailyTask>) =>
     request<DailyTask>(`/daily-tasks/${id}`, { method: "PATCH", body }),
+
+  getParkedThoughts: () => request<ParkedThought[]>("/parked-thoughts"),
+  createParkedThought: (content: string) =>
+    request<ParkedThought>("/parked-thoughts", { method: "POST", body: { content } }),
+  updateParkedThought: (id: number, body: { content?: string; completed?: boolean }) =>
+    request<ParkedThought>(`/parked-thoughts/${id}`, { method: "PATCH", body }),
+  deleteParkedThought: (id: number) =>
+    request<void>(`/parked-thoughts/${id}`, { method: "DELETE" }),
   generatePlan: (body: { available_minutes: number; task_date?: string }) =>
     request<AdaptiveDailyPlan>(
       "/daily-tasks/generate",
@@ -371,7 +391,8 @@ export const api = {
   getTodayDashboard: () => request<TodayDashboard>("/dashboard/today"),
   getDayDashboard: (date: string) =>
     request<TodayDashboard>(`/dashboard/today?date=${date}`),
-  getWeekDashboard: () => request<WeekDashboard>("/dashboard/week"),
+  getWeekDashboard: (date?: string) =>
+    request<WeekDashboard>(date ? `/dashboard/week?date=${date}` : "/dashboard/week"),
 
   generateReview: (body: { review_date?: string }) =>
     request<DailyReview>("/reviews/generate", { method: "POST", body }),

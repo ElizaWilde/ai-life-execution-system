@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { api, DailyTask, TodayDashboard, WeekDashboard } from "../../lib/api";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { api, DailyTask, ParkedThought, TodayDashboard, WeekDashboard } from "../../lib/api";
 import { subscribeToCheckInUpdates } from "../../lib/check-in-sync";
 import { loadAppSettings, orderByWeekStart, useAppSettings } from "../../lib/settings";
 
@@ -69,6 +69,12 @@ function taskLabel(task: DailyTask) {
   return "Planned";
 }
 
+function orderParkedThoughts(thoughts: ParkedThought[]) {
+  return [...thoughts].sort(
+    (left, right) => Number(left.completed) - Number(right.completed) || right.id - left.id,
+  );
+}
+
 export default function DashboardPage() {
   const appSettings = useAppSettings();
   const focusMinutes = Math.max(1, Number(appSettings.focusMinutes) || 25);
@@ -86,13 +92,21 @@ export default function DashboardPage() {
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerMode, setTimerMode] = useState<TimerMode>("focus");
   const [completedFocusSessions, setCompletedFocusSessions] = useState(0);
+  const [parkedThoughts, setParkedThoughts] = useState<ParkedThought[]>([]);
+  const [parkInput, setParkInput] = useState("");
+  const [parkBusy, setParkBusy] = useState(false);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [todayData, weekData] = await Promise.all([api.getTodayDashboard(), api.getWeekDashboard()]);
+        const [todayData, weekData, thoughtData] = await Promise.all([
+          api.getTodayDashboard(),
+          api.getWeekDashboard(),
+          api.getParkedThoughts(),
+        ]);
         setToday(todayData);
         setWeek(weekData);
+        setParkedThoughts(orderParkedThoughts(thoughtData));
         setError("");
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : "Failed to load dashboard");
@@ -182,6 +196,51 @@ export default function DashboardPage() {
     setTimerSeconds(timerDurationSeconds);
   }
 
+  async function addParkedThought(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = parkInput.trim();
+    if (!content || parkBusy) return;
+    setParkBusy(true);
+    try {
+      const thought = await api.createParkedThought(content);
+      setParkedThoughts((current) => orderParkedThoughts([thought, ...current]));
+      setParkInput("");
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not park that thought");
+    } finally {
+      setParkBusy(false);
+    }
+  }
+
+  async function toggleParkedThought(thought: ParkedThought) {
+    if (parkBusy) return;
+    setParkBusy(true);
+    try {
+      const updated = await api.updateParkedThought(thought.id, { completed: !thought.completed });
+      setParkedThoughts((current) => orderParkedThoughts(current.map((item) => item.id === updated.id ? updated : item)));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update that thought");
+    } finally {
+      setParkBusy(false);
+    }
+  }
+
+  async function removeParkedThought(thoughtId: number) {
+    if (parkBusy) return;
+    setParkBusy(true);
+    try {
+      await api.deleteParkedThought(thoughtId);
+      setParkedThoughts((current) => current.filter((thought) => thought.id !== thoughtId));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not remove that thought");
+    } finally {
+      setParkBusy(false);
+    }
+  }
+
   return (
     <section className="life-dashboard">
       <header className="life-hero">
@@ -245,6 +304,45 @@ export default function DashboardPage() {
               <span>{timerRunning ? "Ⅱ" : "▶"}</span> {timerRunning ? "Pause" : "Start"}
             </button>
             <button className="timer-restart" onClick={restartTimer} type="button">↻ Restart</button>
+          </div>
+        </article>
+
+        <article className="panel park-panel">
+          <div className="panel-heading">
+            <div className="park-heading"><h2>Park</h2><span>{parkedThoughts.filter((thought) => !thought.completed).length}</span></div>
+            <small>Capture it, keep focusing</small>
+          </div>
+          <form className="park-form" onSubmit={addParkedThought}>
+            <input
+              aria-label="Park a sudden thought"
+              maxLength={500}
+              onChange={(event) => setParkInput(event.target.value)}
+              placeholder="A sudden thought or idea..."
+              value={parkInput}
+            />
+            <button aria-label="Add thought to Park" disabled={parkBusy || !parkInput.trim()} type="submit">+</button>
+          </form>
+          <div className="park-list">
+            {parkedThoughts.length === 0 ? <p className="park-empty">Ideas that interrupt your focus can wait safely here.</p> : null}
+            {parkedThoughts.map((thought) => (
+              <div className={thought.completed ? "completed" : ""} key={thought.id}>
+                <button
+                  aria-label={thought.completed ? `Mark ${thought.content} as open` : `Mark ${thought.content} complete`}
+                  className="park-check"
+                  disabled={parkBusy}
+                  onClick={() => toggleParkedThought(thought)}
+                  type="button"
+                >{thought.completed ? "✓" : ""}</button>
+                <span title={thought.content}>{thought.content}</span>
+                <button
+                  aria-label={`Remove ${thought.content}`}
+                  className="park-remove"
+                  disabled={parkBusy}
+                  onClick={() => removeParkedThought(thought.id)}
+                  type="button"
+                >×</button>
+              </div>
+            ))}
           </div>
         </article>
 

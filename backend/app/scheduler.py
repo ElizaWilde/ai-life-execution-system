@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import signal
-import threading
 from collections.abc import Callable
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, JobExecutionEvent
+from apscheduler.executors.pool import ThreadPoolExecutor
+from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -51,19 +53,73 @@ class AutomationScheduler:
                 else settings.scheduler_notification_grace_minutes
             )
         )
-        self.stop_event = threading.Event()
+        self.apscheduler: BlockingScheduler | None = None
 
     def run_forever(self) -> None:
-        logger.info("Scheduler started (poll interval: %.1fs)", self.poll_seconds)
-        while not self.stop_event.is_set():
-            started = datetime.now(timezone.utc)
-            self.run_once(started)
-            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-            self.stop_event.wait(max(1.0, self.poll_seconds - elapsed))
-        logger.info("Scheduler stopped")
+        self.apscheduler = self.build_apscheduler()
+        logger.info(
+            "APScheduler started with %d jobs (base interval: %.1fs)",
+            len(self.apscheduler.get_jobs()),
+            self.poll_seconds,
+        )
+        self.apscheduler.start()
 
     def stop(self, *_: object) -> None:
-        self.stop_event.set()
+        if self.apscheduler is not None and self.apscheduler.running:
+            logger.info("Stopping APScheduler")
+            self.apscheduler.shutdown(wait=False)
+
+    def build_apscheduler(
+        self,
+        *,
+        first_run_time: datetime | None = None,
+    ) -> BlockingScheduler:
+        scheduler = BlockingScheduler(
+            timezone=timezone.utc,
+            executors={"default": ThreadPoolExecutor(max_workers=1)},
+            job_defaults={
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": max(1, round(self.poll_seconds * 2)),
+            },
+        )
+        scheduler.add_listener(
+            self._log_job_event,
+            EVENT_JOB_EXECUTED | EVENT_JOB_ERROR,
+        )
+        first_run_time = first_run_time or datetime.now(timezone.utc)
+        for name in self._job_functions():
+            scheduler.add_job(
+                self.run_job,
+                trigger="interval",
+                seconds=self.poll_seconds,
+                args=[name],
+                id=name,
+                name=name.replace("_", " ").title(),
+                next_run_time=first_run_time,
+                replace_existing=True,
+            )
+        return scheduler
+
+    def run_job(self, name: str, now: datetime | None = None) -> int:
+        jobs = self._job_functions()
+        if name not in jobs:
+            raise KeyError(f"Unknown scheduler job: {name}")
+        now = now or datetime.now(timezone.utc)
+        with self.session_factory() as db:
+            if not self._acquire_lock(db):
+                logger.info("Job %s skipped because another scheduler owns the lock", name)
+                return 0
+            try:
+                result = jobs[name](db, now)
+                logger.info("Scheduler job complete: %s=%d", name, result)
+                return result
+            except Exception:
+                db.rollback()
+                logger.exception("Scheduler job failed: %s", name)
+                raise
+            finally:
+                self._release_lock(db)
 
     def run_once(self, now: datetime | None = None) -> dict[str, int]:
         now = now or datetime.now(timezone.utc)
@@ -76,15 +132,7 @@ class AutomationScheduler:
                 logger.info("Another scheduler owns the database lock; cycle skipped")
                 return {"skipped_locked": 1}
             try:
-                jobs: tuple[tuple[str, Callable[[Session, datetime], int]], ...] = (
-                    ("due_reminders", self.dispatch_due_notifications),
-                    ("morning_evening", self.send_time_based_notifications),
-                    ("overdue_tasks", self.detect_overdue_tasks),
-                    ("procrastination", self.detect_procrastination_signals),
-                    ("completion_forecasts", self.recalculate_completion_forecasts),
-                    ("rescheduling_proposals", self.generate_rescheduling_proposals),
-                )
-                for name, job in jobs:
+                for name, job in self._job_functions().items():
                     try:
                         results[name] = job(db, now)
                     except Exception:
@@ -95,6 +143,25 @@ class AutomationScheduler:
                 return results
             finally:
                 self._release_lock(db)
+
+    def _job_functions(
+        self,
+    ) -> dict[str, Callable[[Session, datetime], int]]:
+        return {
+            "due_reminders": self.dispatch_due_notifications,
+            "morning_evening": self.send_time_based_notifications,
+            "overdue_tasks": self.detect_overdue_tasks,
+            "procrastination": self.detect_procrastination_signals,
+            "completion_forecasts": self.recalculate_completion_forecasts,
+            "rescheduling_proposals": self.generate_rescheduling_proposals,
+        }
+
+    @staticmethod
+    def _log_job_event(event: JobExecutionEvent) -> None:
+        if event.exception is not None:
+            logger.error("APScheduler job %s failed: %s", event.job_id, event.exception)
+        else:
+            logger.info("APScheduler job %s executed", event.job_id)
 
     def dispatch_due_notifications(self, db: Session, now: datetime) -> int:
         stale_before = now - timedelta(minutes=settings.scheduler_stale_sending_minutes)

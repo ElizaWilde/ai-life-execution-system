@@ -9,3 +9,4 @@ python-dotenv
 httpx
 notion-client
 pytest
+APScheduler==3.11.3
