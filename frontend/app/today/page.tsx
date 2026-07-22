@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   AdaptiveDailyPlan,
   api,
@@ -16,14 +16,14 @@ import { useAppSettings, workloadMinutes } from "../../lib/settings";
 import { announceCheckInUpdate, subscribeToCheckInUpdates } from "../../lib/check-in-sync";
 import { AVAILABLE_TIME_OPTIONS, availableTimeBucket } from "../../lib/check-in-options";
 
-type TodayIconName = "spark" | "clock" | "check" | "play" | "sleep" | "energy" | "mood" | "calendar" | "target" | "chart" | "edit";
+type TodayIconName = "spark" | "clock" | "check" | "trash" | "sleep" | "energy" | "mood" | "calendar" | "target" | "chart" | "edit";
 
 function TodayIcon({ name, size = 18 }: { name: TodayIconName; size?: number }) {
   const paths: Record<TodayIconName, React.ReactNode> = {
     spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
-    play: <path d="m9 7 7 5-7 5V7Z" />,
+    trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
     sleep: <path d="M20 15.2A8.5 8.5 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z" />,
     energy: <path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z" />,
     mood: <><circle cx="12" cy="12" r="9" /><path d="M8.5 10h.01M15.5 10h.01M8 14s1.5 2 4 2 4-2 4-2" /></>,
@@ -47,11 +47,9 @@ function formatMinutes(minutes: number) {
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
-function statusLabel(task: DailyTask) {
-  if (task.status === "completed") return "Completed";
-  if (task.status === "in_progress") return "In Progress";
-  if (task.priority === "high") return "At Risk";
-  return "Planned";
+function formatHours(minutes: number) {
+  const hours = minutes / 60;
+  return `${hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)}h`;
 }
 
 const sleepHourOptions = Array.from({ length: 19 }, (_, index) => 3 + index / 2);
@@ -70,7 +68,6 @@ export default function TodayPage() {
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [dashboard, setDashboard] = useState<TodayDashboard | null>(null);
   const [generatedPlan, setGeneratedPlan] = useState<AdaptiveDailyPlan | null>(null);
-  const [filter, setFilter] = useState<"all" | Priority>("all");
   const [showAddTask, setShowAddTask] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -78,7 +75,7 @@ export default function TodayPage() {
   const [message, setMessage] = useState("");
 
   const [title, setTitle] = useState("");
-  const [minutes, setMinutes] = useState("30");
+  const [taskHours, setTaskHours] = useState("0.5");
   const [priority, setPriority] = useState<Priority>("medium");
   const [availableMinutes, setAvailableMinutes] = useState("360");
   const [energy, setEnergy] = useState<EnergyLevel>("steady");
@@ -126,20 +123,19 @@ export default function TodayPage() {
 
   const completion = Math.round((dashboard?.completion_rate ?? 0) * 100);
   const circumference = 2 * Math.PI * 34;
-  const filteredTasks = tasks.filter((task) => filter === "all" || task.priority === filter);
-  const taskCounts = useMemo(() => ({
-    all: tasks.length,
-    high: tasks.filter((task) => task.priority === "high").length,
-    medium: tasks.filter((task) => task.priority === "medium").length,
-    low: tasks.filter((task) => task.priority === "low").length,
-  }), [tasks]);
+  const plannedFocusMinutes = tasks
+    .filter((task) => task.status !== "cancelled")
+    .reduce((total, task) => total + (task.estimated_minutes ?? 0), 0);
+  const sortedTasks = [...tasks].sort((left, right) =>
+    Number(left.status === "completed") - Number(right.status === "completed") || left.id - right.id,
+  );
 
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await api.createTask({ title, task_date: today, estimated_minutes: Number(minutes) || null, priority, source: "manual" });
+      await api.createTask({ title, task_date: today, estimated_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null, priority, source: "manual" });
       setTitle("");
       setShowAddTask(false);
       await loadToday();
@@ -162,10 +158,19 @@ export default function TodayPage() {
     }
   }
 
-  function reorderTasks() {
-    const rank = { high: 3, medium: 2, low: 1 };
-    setTasks((current) => [...current].sort((a, b) => rank[b.priority] - rank[a.priority]));
-    setMessage("Tasks reordered by priority.");
+  async function deleteTask(task: DailyTask) {
+    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteTask(task.id);
+      setMessage(`Deleted: ${task.title}`);
+      await loadToday();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to delete task");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveCheckIn(event: FormEvent<HTMLFormElement>) {
@@ -228,35 +233,33 @@ export default function TodayPage() {
       <div className="today-workspace-grid">
         <main className="today-main-column">
           <section className="today-card today-plan-card">
-            <div className="today-plan-heading"><div><h2>Today’s Plan</h2><span>{tasks.length} tasks</span></div><div><button className="today-outline-button" onClick={reorderTasks} type="button">⇅ Reorder</button><button className="today-primary-button" onClick={() => setShowAddTask((show) => !show)} type="button">＋ Add Task</button></div></div>
-
-            {showAddTask ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input className="input" min="0" type="number" value={minutes} onChange={(event) => setMinutes(event.target.value)} /><select className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">Add task</button></form> : null}
+            <div className="today-plan-heading"><div><h2>Today’s Plan</h2><span>{tasks.length} tasks</span></div></div>
 
             <div className="today-progress-card">
               <div className="today-progress-ring"><svg viewBox="0 0 80 80"><circle className="track" cx="40" cy="40" r="34" /><circle className="value" cx="40" cy="40" r="34" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - completion / 100)} /></svg><strong>{completion}%</strong></div>
               <div className="progress-copy"><strong>Daily Progress</strong><span>{dashboard?.completed_tasks ?? 0} of {dashboard?.planned_tasks ?? tasks.length} tasks completed</span></div>
               <div className="progress-divider" />
-              <span className="progress-metric-icon blue"><TodayIcon name="clock" /></span><div className="progress-copy"><strong>Focus Time</strong><span>{formatMinutes(dashboard?.focus_minutes ?? 0)} / {formatMinutes(Number(availableMinutes))}</span></div>
+              <span className="progress-metric-icon blue"><TodayIcon name="clock" /></span><div className="progress-copy"><strong>Focus Time</strong><span>{formatMinutes(dashboard?.focus_minutes ?? 0)} / {formatHours(plannedFocusMinutes)}</span></div>
               <div className="progress-divider" />
               <span className="progress-metric-icon green"><TodayIcon name="check" /></span><div className="progress-copy"><strong>Tasks Completed</strong><span>{dashboard?.completed_tasks ?? 0} / {dashboard?.planned_tasks ?? tasks.length}</span></div>
             </div>
 
-            <div className="today-task-tabs">
-              {(["all", "high", "medium", "low"] as const).map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)} type="button">{item === "all" ? "All" : item[0].toUpperCase() + item.slice(1)} ({taskCounts[item]})</button>)}
-            </div>
-
             <div className="today-work-list">
               {loading ? <p className="today-empty">Loading today’s plan…</p> : null}
-              {!loading && !filteredTasks.length ? <p className="today-empty">No tasks in this view.</p> : null}
-              {filteredTasks.map((task) => <article className="today-work-row" key={task.id}>
-                <button aria-label={task.status === "completed" ? "Mark task pending" : "Complete task"} className={`work-check ${task.status === "completed" ? "checked" : task.priority === "high" ? "risk" : ""}`} disabled={busy} onClick={() => setStatus(task, task.status === "completed" ? "pending" : "completed")} type="button">{task.status === "completed" ? "✓" : ""}</button>
-                <div className="work-copy"><strong>{task.title}</strong><span><b className={`source-${task.source}`}>{task.source}</b><i><TodayIcon name="clock" size={13} /> {task.estimated_minutes ? formatMinutes(task.estimated_minutes) : "Flexible"}</i></span></div>
-                <span className={`today-status status-${task.status} ${task.priority === "high" && task.status === "pending" ? "at-risk" : ""}`}>{statusLabel(task)}</span>
-                {task.status !== "completed" ? <button className="task-start-button" disabled={busy} onClick={() => setStatus(task, "in_progress")} type="button"><TodayIcon name="play" size={14} /> Start</button> : null}
-                <span className="task-menu">•••</span>
+              {!loading && !sortedTasks.length ? <p className="today-empty">No tasks yet. Add the first task for today.</p> : null}
+              {sortedTasks.map((task, index) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""}`} key={task.id}>
+                <span className="priority-index">{index + 1}</span>
+                <span className="priority-title">{task.title}</span>
+                <b className={`today-priority ${task.priority}`}>{task.priority}</b>
+                <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
+                <div className="priority-row-actions">
+                  <button aria-label={task.status === "completed" ? `Completed ${task.title}` : `Done ${task.title}`} className="priority-done-button" disabled={busy || task.status === "completed"} onClick={() => setStatus(task, "completed")} title={task.status === "completed" ? "Completed" : "Mark done"} type="button"><TodayIcon name="check" size={17} /></button>
+                  <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete task" type="button"><TodayIcon name="trash" size={17} /></button>
+                </div>
               </article>)}
+              {showAddTask ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">Add task</button><button className="today-add-cancel" onClick={() => setShowAddTask(false)} type="button">Cancel</button></form> : null}
+              {!showAddTask ? <button className="today-add-bottom" onClick={() => setShowAddTask(true)} type="button">＋ Add Task</button> : null}
             </div>
-            <button className="today-add-bottom" onClick={() => setShowAddTask(true)} type="button">＋ Add Task</button>
           </section>
 
           <section className="today-card ai-plan-card ai-plan-main-card">

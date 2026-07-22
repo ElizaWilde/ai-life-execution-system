@@ -11,7 +11,7 @@ import {
   WeeklyGoal,
 } from "../../lib/api";
 
-type PlanIconName = "spark" | "calendar" | "chart" | "check" | "arrow" | "plus" | "target";
+type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target";
 
 function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
   const paths: Record<PlanIconName, React.ReactNode> = {
@@ -19,6 +19,7 @@ function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
     chart: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /></>,
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
+    trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
     arrow: <path d="M5 12h14M15 8l4 4-4 4" />,
     plus: <path d="M12 5v14M5 12h14" />,
     target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><path d="M12 8V5" /></>,
@@ -102,15 +103,16 @@ export default function WeeklyPlanPage() {
   }, []);
 
   const allTasks = useMemo(
-    () => days.flatMap((day) => day.unfinished_tasks).sort((left, right) =>
+    () => days.flatMap((day) => day.tasks).filter((task) => task.status !== "cancelled").sort((left, right) =>
+      Number(left.status === "completed") - Number(right.status === "completed") ||
       taskRank(right.priority) - taskRank(left.priority) ||
       left.task_date.localeCompare(right.task_date) ||
       left.id - right.id,
     ),
     [days],
   );
-  const priorities = allTasks.slice(0, 6);
-  const highPriorityCount = allTasks.filter((task) => task.priority === "high").length;
+  const priorities = allTasks;
+  const highPriorityCount = allTasks.filter((task) => task.priority === "high" && task.status !== "completed").length;
   const plannedMinutes = week?.daily_focus.reduce((sum, point) => sum + point.planned_minutes, 0) ?? 0;
   const targetMinutes = goals.reduce((sum, goal) => sum + (goal.target_minutes ?? 0), 0);
   const completion = Math.round((week?.completion_rate ?? 0) * 100);
@@ -168,6 +170,21 @@ export default function WeeklyPlanPage() {
       await loadPlan(weekAnchor);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to complete priority");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteTask(task: DailyTask) {
+    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteTask(task.id);
+      setMessage(`Deleted: ${task.title}`);
+      await loadPlan(weekAnchor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to delete priority");
     } finally {
       setBusy(false);
     }
@@ -232,14 +249,25 @@ export default function WeeklyPlanPage() {
                 {loading ? <p>Loading priorities…</p> : null}
                 {!loading && priorities.length === 0 ? <p>No priorities yet. Add the first meaningful task for this week.</p> : null}
                 {priorities.map((task, index) => (
-                  <div key={task.id}>
-                    <button aria-label={`Complete ${task.title}`} disabled={busy} onClick={() => completeTask(task)} type="button">{index + 1}</button>
-                    <span>{task.title}</span>
+                  <div className={task.status === "completed" ? "completed" : ""} key={task.id}>
+                    <span className="priority-index">{index + 1}</span>
+                    <span className="priority-title">{task.title}</span>
                     <b className={task.priority}>{task.priority}</b>
                     <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
+                    <div className="priority-row-actions">
+                      <button aria-label={task.status === "completed" ? `Completed ${task.title}` : `Done ${task.title}`} className="priority-done-button" disabled={busy || task.status === "completed"} onClick={() => completeTask(task)} title={task.status === "completed" ? "Completed" : "Mark done"} type="button"><PlanIcon name="check" size={17} /></button>
+                      <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete priority" type="button"><PlanIcon name="trash" size={17} /></button>
+                    </div>
                   </div>
                 ))}
-                <button className="add-priority-button" onClick={() => setShowTaskForm((show) => !show)} type="button"><PlanIcon name="plus" size={14} /> Add Priority</button>
+                {!showTaskForm ? <button className="add-priority-button" onClick={() => setShowTaskForm(true)} type="button"><PlanIcon name="plus" size={14} /> Add Priority</button> : null}
+                {showTaskForm ? <form className="reference-task-form" onSubmit={createTask}>
+                  <input maxLength={255} placeholder="Priority title" required value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
+                  <input aria-label="Estimated hours" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} />
+                  <select aria-label="Priority level" value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+                  <button disabled={busy} type="submit">Save priority</button>
+                  <button onClick={() => setShowTaskForm(false)} type="button">Cancel</button>
+                </form> : null}
               </div>
               <aside className="weekly-ai-suggestion">
                 <h3><PlanIcon name="spark" /> AI Suggestion</h3>
@@ -248,13 +276,6 @@ export default function WeeklyPlanPage() {
               </aside>
             </div>
 
-            {showTaskForm ? <form className="reference-task-form" onSubmit={createTask}>
-              <input maxLength={255} placeholder="Priority title" required value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
-              <input aria-label="Estimated hours" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} />
-              <select aria-label="Priority level" value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
-              <button disabled={busy} type="submit">Save priority</button>
-              <button onClick={() => setShowTaskForm(false)} type="button">Cancel</button>
-            </form> : null}
           </section>
         </main>
       )}

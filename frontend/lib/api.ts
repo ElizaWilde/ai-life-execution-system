@@ -140,6 +140,7 @@ export type TodayDashboard = {
   planned_tasks: number;
   completed_tasks: number;
   completion_rate: number;
+  tasks: DailyTask[];
   unfinished_tasks: DailyTask[];
   time_allocation: TimeAllocationPoint[];
   check_in: DailyCheckIn | null;
@@ -336,6 +337,8 @@ export const api = {
   }) => request<DailyTask>("/daily-tasks", { method: "POST", body }),
   updateTask: (id: number, body: Partial<DailyTask>) =>
     request<DailyTask>(`/daily-tasks/${id}`, { method: "PATCH", body }),
+  deleteTask: (id: number) =>
+    request<void>(`/daily-tasks/${id}`, { method: "DELETE" }),
 
   getParkedThoughts: () => request<ParkedThought[]>("/parked-thoughts"),
   createParkedThought: (content: string) =>

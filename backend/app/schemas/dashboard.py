@@ -19,6 +19,7 @@ class TodayDashboardResponse(BaseModel):
     planned_tasks: int = Field(ge=0)
     completed_tasks: int = Field(ge=0)
     completion_rate: float = Field(ge=0, le=1)
+    tasks: list[DailyTaskRead]
     unfinished_tasks: list[DailyTaskRead]
     time_allocation: list[TimeAllocationPoint]
     check_in: DailyCheckInRead | None

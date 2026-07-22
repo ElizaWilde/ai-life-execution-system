@@ -63,6 +63,10 @@ def test_today_dashboard_stats(client, user_headers):
     assert body["planned_tasks"] == 2
     assert body["completed_tasks"] == 1
     assert body["completion_rate"] == 0.5
+    assert [task["title"] for task in body["tasks"]] == [
+        "Finish dashboard service",
+        "Write dashboard API tests",
+    ]
     assert [task["title"] for task in body["unfinished_tasks"]] == [
         "Write dashboard API tests"
     ]

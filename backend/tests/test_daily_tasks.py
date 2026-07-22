@@ -23,6 +23,26 @@ def test_manually_create_daily_task(client, user_headers):
     assert [task["id"] for task in today.json()] == [response.json()["id"]]
 
 
+def test_delete_daily_task(client, user_headers):
+    task = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Remove this priority",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 30,
+            "priority": "medium",
+        },
+    ).json()
+
+    deleted = client.delete(f"/daily-tasks/{task['id']}", headers=user_headers)
+
+    assert deleted.status_code == 204
+    today = client.get("/daily-tasks/today", headers=user_headers)
+    assert all(item["id"] != task["id"] for item in today.json())
+    assert client.delete(f"/daily-tasks/{task['id']}", headers=user_headers).status_code == 404
+
+
 def test_generate_ai_daily_plan(client, user_headers, monkeypatch):
     monkeypatch.setattr("app.api.daily_tasks.settings.ollama_api_key", "test-key")
     today = date.today()

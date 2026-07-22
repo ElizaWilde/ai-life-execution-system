@@ -174,3 +174,22 @@ def update_daily_task(
     db.commit()
     db.refresh(task)
     return task
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_daily_task(
+    task_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    task = db.scalar(
+        select(DailyTask).where(
+            DailyTask.id == task_id,
+            DailyTask.user_id == user.id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Daily task not found")
+
+    db.delete(task)
+    db.commit()

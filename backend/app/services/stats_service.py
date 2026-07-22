@@ -76,6 +76,7 @@ class StatsService:
             planned_tasks=planned_tasks,
             completed_tasks=completed_tasks,
             completion_rate=self._completion_rate(completed_tasks, planned_tasks),
+            tasks=tasks,
             unfinished_tasks=unfinished_tasks,
             time_allocation=self._time_allocation(tasks, sessions),
             check_in=check_in,
