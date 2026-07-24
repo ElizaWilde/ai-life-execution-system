@@ -15,6 +15,7 @@ from app.api import (
     notion,
     notifications,
     parked_thoughts,
+    phases,
     reviews,
     study_sessions,
     users,
@@ -52,6 +53,7 @@ app.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
 app.include_router(notion.router, prefix="/notion", tags=["Notion"])
 app.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 app.include_router(parked_thoughts.router, prefix="/parked-thoughts", tags=["Park"])
+app.include_router(phases.router, prefix="/phases", tags=["Phases"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(user_app_settings.router, prefix="/app-settings", tags=["App Settings"])
 app.include_router(weekly_goals.router, prefix="/weekly-goals", tags=["Weekly Goals"])

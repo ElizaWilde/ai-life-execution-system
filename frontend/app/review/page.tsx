@@ -96,7 +96,7 @@ export default function ReviewPage() {
     const points = week?.daily_focus ?? [];
     return points.reduce<(typeof points)[number] | null>((best, point) => !best || point.focus_minutes > best.focus_minutes ? point : best, null);
   }, [week]);
-  const chartMax = Math.max(60, ...(week?.daily_focus.map((point) => point.focus_minutes) ?? [60]));
+  const chartMaximumMinutes = 15 * 60;
   const displayedFocus = orderByWeekStart(week?.daily_focus ?? [], (point) => point.date, appSettings.weekStart);
   const date = dateAt(reviewDate);
   const weekLabel = week ? `${dateAt(week.week_start).toLocaleDateString("en", { month: "short", day: "numeric" })} – ${dateAt(week.week_end).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}` : "This week";
@@ -176,7 +176,7 @@ export default function ReviewPage() {
 
           <section className="review-card review-actions"><h2><ReviewIcon name="energy" /> Actions</h2><div><button disabled={busy} onClick={generateWeeklyReview} type="button"><ReviewIcon name="spark" /> Generate Weekly Review</button><Link href="/weekly-plan"><ReviewIcon name="calendar" /> Plan Tomorrow</Link></div></section>
 
-          <section className="review-card weekly-focus-chart"><div className="review-side-heading"><h2>This Week: Focus Hours</h2><span><i /> Focus Time (h)</span></div><div className="review-chart"><div className="review-chart-axis"><span>15h</span><span>10h</span><span>5h</span><span>0h</span></div><div className="review-chart-bars">{displayedFocus.map((point) => <div key={point.date}><span style={{ height: `${Math.max(3, point.focus_minutes / chartMax * 100)}%` }} /><small>{dateAt(point.date).toLocaleDateString("en", { weekday: "short" })}</small></div>)}</div></div></section>
+          <section className="review-card weekly-focus-chart"><div className="review-side-heading"><h2>This Week: Focus Hours</h2><span><i /> Focus Time (h)</span></div><div className="review-chart"><div className="review-chart-axis"><span>15h</span><span>10h</span><span>5h</span><span>0h</span></div><div className="review-chart-bars">{displayedFocus.map((point) => <div key={point.date}><div className="review-bar-area"><span style={{ height: `${Math.min(100, point.focus_minutes / chartMaximumMinutes * 100)}%` }} /></div><small>{dateAt(point.date).toLocaleDateString("en", { weekday: "short" })}</small></div>)}</div></div></section>
         </aside>
       </div>
     </section>

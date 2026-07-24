@@ -105,6 +105,38 @@ export type WeeklyGoal = {
   updated_at: string;
 };
 
+export type MilestoneStatus = "not_started" | "in_progress" | "completed";
+export type PhaseStatus = "planning" | "active" | "completed" | "archived";
+
+export type PhaseMilestone = {
+  id: number;
+  phase_id: number;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  status: MilestoneStatus;
+  progress: number;
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PhasePlan = {
+  id: number;
+  user_id: number;
+  title: string;
+  description: string | null;
+  start_date: string;
+  end_date: string;
+  status: PhaseStatus;
+  progress: number;
+  estimated_focus_minutes: number;
+  notes: string | null;
+  milestones: PhaseMilestone[];
+  created_at: string;
+  updated_at: string;
+};
+
 export type DailyTask = {
   id: number;
   user_id: number;
@@ -324,6 +356,34 @@ export const api = {
   }) => request<WeeklyGoal>("/weekly-goals", { method: "POST", body }),
   updateGoal: (id: number, body: Partial<WeeklyGoal>) =>
     request<WeeklyGoal>(`/weekly-goals/${id}`, { method: "PATCH", body }),
+
+  getPhases: () => request<PhasePlan[]>("/phases"),
+  createPhase: (body: {
+    title: string;
+    description?: string | null;
+    start_date: string;
+    end_date: string;
+    status: PhaseStatus;
+    progress: number;
+    estimated_focus_minutes: number;
+    notes?: string | null;
+  }) => request<PhasePlan>("/phases", { method: "POST", body }),
+  updatePhase: (id: number, body: Partial<Omit<PhasePlan, "id" | "user_id" | "milestones" | "created_at" | "updated_at">>) =>
+    request<PhasePlan>(`/phases/${id}`, { method: "PATCH", body }),
+  deletePhase: (id: number) =>
+    request<void>(`/phases/${id}`, { method: "DELETE" }),
+  createMilestone: (phaseId: number, body: {
+    title: string;
+    description?: string | null;
+    due_date?: string | null;
+    status: MilestoneStatus;
+    progress: number;
+    position?: number;
+  }) => request<PhaseMilestone>(`/phases/${phaseId}/milestones`, { method: "POST", body }),
+  updateMilestone: (phaseId: number, milestoneId: number, body: Partial<Omit<PhaseMilestone, "id" | "phase_id" | "created_at" | "updated_at">>) =>
+    request<PhaseMilestone>(`/phases/${phaseId}/milestones/${milestoneId}`, { method: "PATCH", body }),
+  deleteMilestone: (phaseId: number, milestoneId: number) =>
+    request<void>(`/phases/${phaseId}/milestones/${milestoneId}`, { method: "DELETE" }),
 
   getTodayTasks: () => request<DailyTask[]>("/daily-tasks/today"),
   createTask: (body: {

@@ -2,7 +2,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
@@ -90,6 +90,27 @@ def finish_study_session(
     session.duration_minutes = int(elapsed_seconds // 60)
     session.status = "completed"
     session.notes = payload.notes
+    db.flush()
+
+    if session.daily_task_id is not None:
+        task = db.scalar(
+            select(DailyTask).where(
+                DailyTask.id == session.daily_task_id,
+                DailyTask.user_id == user.id,
+            )
+        )
+        if task is not None and task.estimated_minutes is not None and task.estimated_minutes > 0:
+            focused_minutes = db.scalar(
+                select(func.coalesce(func.sum(StudySession.duration_minutes), 0)).where(
+                    StudySession.daily_task_id == task.id,
+                    StudySession.user_id == user.id,
+                    StudySession.status == "completed",
+                )
+            )
+            if focused_minutes >= task.estimated_minutes:
+                task.status = "completed"
+                task.completed_at = ended_at
+
     db.commit()
     db.refresh(session)
     return session

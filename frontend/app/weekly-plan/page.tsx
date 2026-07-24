@@ -1,17 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   api,
-  DailyTask,
+  MilestoneStatus,
+  PhaseMilestone,
+  PhasePlan,
+  PhaseStatus,
   Priority,
-  TodayDashboard,
   WeekDashboard,
   WeeklyGoal,
 } from "../../lib/api";
 
-type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target";
+type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target" | "flag" | "clock" | "people" | "edit" | "more" | "grip";
 
 function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
   const paths: Record<PlanIconName, React.ReactNode> = {
@@ -23,6 +25,12 @@ function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
     arrow: <path d="M5 12h14M15 8l4 4-4 4" />,
     plus: <path d="M12 5v14M5 12h14" />,
     target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><path d="M12 8V5" /></>,
+    flag: <><path d="M5 21V4" /><path d="M5 5h11l-2 4 2 4H5" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    people: <><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 20v-2a4 4 0 0 0-3-3.7M16 3.3a4 4 0 0 1 0 7.4" /></>,
+    edit: <><path d="M12 20h9" /><path d="m16.5 3.5 4 4L8 20H4v-4Z" /></>,
+    more: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></>,
+    grip: <><circle cx="8" cy="6" r="1" fill="currentColor" stroke="none" /><circle cx="16" cy="6" r="1" fill="currentColor" stroke="none" /><circle cx="8" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="16" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="8" cy="18" r="1" fill="currentColor" stroke="none" /><circle cx="16" cy="18" r="1" fill="currentColor" stroke="none" /></>,
   };
   return <svg aria-hidden="true" className="plan-icon" fill="none" height={size} viewBox="0 0 24 24" width={size}>{paths[name]}</svg>;
 }
@@ -49,6 +57,12 @@ function formatHours(minutes: number) {
   return `${hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)}h`;
 }
 
+function weeklyPriorityWeight(goal: WeeklyGoal) {
+  const priorityMultiplier = { high: 3, medium: 2, low: 1 }[goal.priority];
+  const estimatedMinutes = goal.target_minutes && goal.target_minutes > 0 ? goal.target_minutes : 60;
+  return estimatedMinutes * priorityMultiplier;
+}
+
 function isoWeek(value: string) {
   const date = dateAt(value);
   const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -57,21 +71,93 @@ function isoWeek(value: string) {
   return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
 }
 
-function taskRank(priority: Priority) {
-  return priority === "high" ? 3 : priority === "medium" ? 2 : 1;
+function formatPhaseDate(value: string) {
+  return dateAt(value).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatPhaseRange(phase: PhasePlan) {
+  const start = dateAt(phase.start_date);
+  const end = dateAt(phase.end_date);
+  const sameYear = start.getFullYear() === end.getFullYear();
+  return `${start.toLocaleDateString("en", { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" })} – ${end.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
+function phaseStatusLabel(status: PhaseStatus) {
+  return status === "active" ? "On Track" : status[0].toUpperCase() + status.slice(1);
+}
+
+function milestoneStatusLabel(status: MilestoneStatus) {
+  return status.split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
+}
+
+type PhaseDraft = {
+  title: string;
+  description: string;
+  start_date: string;
+  end_date: string;
+  status: PhaseStatus;
+  progress: string;
+  estimated_focus_hours: string;
+  notes: string;
+};
+
+type MilestoneDraft = {
+  title: string;
+  description: string;
+  due_date: string;
+  status: MilestoneStatus;
+  progress: string;
+};
+
+function emptyPhaseDraft(): PhaseDraft {
+  const today = localToday();
+  return {
+    title: "",
+    description: "",
+    start_date: today,
+    end_date: addDays(today, 90),
+    status: "planning",
+    progress: "0",
+    estimated_focus_hours: "0",
+    notes: "",
+  };
+}
+
+function emptyMilestoneDraft(): MilestoneDraft {
+  return {
+    title: "",
+    description: "",
+    due_date: "",
+    status: "not_started",
+    progress: "0",
+  };
 }
 
 export default function WeeklyPlanPage() {
   const [weekAnchor, setWeekAnchor] = useState(localToday());
   const [goals, setGoals] = useState<WeeklyGoal[]>([]);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
-  const [days, setDays] = useState<TodayDashboard[]>([]);
   const [activeTab, setActiveTab] = useState<"weekly" | "phase">("weekly");
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [phaseFilter, setPhaseFilter] = useState<"active" | "all">("active");
+  const [phases, setPhases] = useState<PhasePlan[]>([]);
+  const [selectedPhaseId, setSelectedPhaseId] = useState<number | null>(null);
+  const [phaseDetailTab, setPhaseDetailTab] = useState<"milestones" | "tasks" | "focus" | "notes">("milestones");
+  const [phaseLoading, setPhaseLoading] = useState(false);
+  const [phaseBusy, setPhaseBusy] = useState(false);
+  const [showPhaseForm, setShowPhaseForm] = useState(false);
+  const [editingPhaseId, setEditingPhaseId] = useState<number | null>(null);
+  const [phaseDraft, setPhaseDraft] = useState<PhaseDraft>(emptyPhaseDraft);
+  const [showMilestoneForm, setShowMilestoneForm] = useState(false);
+  const [editingMilestoneId, setEditingMilestoneId] = useState<number | null>(null);
+  const [milestoneDraft, setMilestoneDraft] = useState<MilestoneDraft>(emptyMilestoneDraft);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [focusHoursDraft, setFocusHoursDraft] = useState("0");
 
   const [taskTitle, setTaskTitle] = useState("");
   const [taskHours, setTaskHours] = useState("1");
@@ -85,12 +171,8 @@ export default function WeeklyPlanPage() {
         api.getGoalsForWeek(anchor),
         api.getWeekDashboard(anchor),
       ]);
-      const dailyData = await Promise.all(
-        Array.from({ length: 7 }, (_, index) => api.getDayDashboard(addDays(weekData.week_start, index))),
-      );
       setGoals(goalData);
       setWeek(weekData);
-      setDays(dailyData);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to load weekly plan");
     } finally {
@@ -102,20 +184,32 @@ export default function WeeklyPlanPage() {
     loadPlan(weekAnchor);
   }, []);
 
-  const allTasks = useMemo(
-    () => days.flatMap((day) => day.tasks).filter((task) => task.status !== "cancelled").sort((left, right) =>
-      Number(left.status === "completed") - Number(right.status === "completed") ||
-      taskRank(right.priority) - taskRank(left.priority) ||
-      left.task_date.localeCompare(right.task_date) ||
-      left.id - right.id,
-    ),
-    [days],
+  useEffect(() => {
+    if (activeTab === "phase") void loadPhases();
+  }, [activeTab]);
+
+  useEffect(() => {
+    const selected = phases.find((phase) => phase.id === selectedPhaseId);
+    if (selected) {
+      setNotesDraft(selected.notes ?? "");
+      setFocusHoursDraft(String(selected.estimated_focus_minutes / 60));
+    }
+  }, [phases, selectedPhaseId]);
+
+  const priorities = [...goals].sort((left, right) =>
+    Number(left.status === "completed") - Number(right.status === "completed") ||
+    ({ high: 3, medium: 2, low: 1 }[right.priority] - { high: 3, medium: 2, low: 1 }[left.priority]) ||
+    left.id - right.id,
   );
-  const priorities = allTasks;
-  const highPriorityCount = allTasks.filter((task) => task.priority === "high" && task.status !== "completed").length;
-  const plannedMinutes = week?.daily_focus.reduce((sum, point) => sum + point.planned_minutes, 0) ?? 0;
+  const highPriorityCount = priorities.filter((goal) => goal.priority === "high" && goal.status !== "completed").length;
+  const plannedMinutes = goals.reduce((sum, goal) => sum + (goal.target_minutes ?? 0), 0);
   const targetMinutes = goals.reduce((sum, goal) => sum + (goal.target_minutes ?? 0), 0);
-  const completion = Math.round((week?.completion_rate ?? 0) * 100);
+  const completedPriorities = goals.filter((goal) => goal.status === "completed").length;
+  const totalPriorityWeight = goals.reduce((sum, goal) => sum + weeklyPriorityWeight(goal), 0);
+  const completedPriorityWeight = goals
+    .filter((goal) => goal.status === "completed")
+    .reduce((sum, goal) => sum + weeklyPriorityWeight(goal), 0);
+  const completion = totalPriorityWeight ? Math.round((completedPriorityWeight / totalPriorityWeight) * 100) : 0;
   const planVsGoal = targetMinutes ? Math.round((plannedMinutes / targetMinutes) * 100) : 0;
   const weekLabel = week
     ? `${dateAt(week.week_start).toLocaleDateString("en", { month: "short", day: "numeric" })} – ${dateAt(week.week_end).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })} (Week ${isoWeek(week.week_start)})`
@@ -125,6 +219,194 @@ export default function WeeklyPlanPage() {
     : plannedMinutes > targetMinutes && targetMinutes > 0
       ? `This plan is ${formatHours(plannedMinutes - targetMinutes)} above your weekly goal. Move one lower-impact item into the buffer.`
       : "The week has room for focused work. Protect your strongest mornings for the first priorities.";
+  const selectedPhase = phases.find((phase) => phase.id === selectedPhaseId) ?? null;
+  const visiblePhases = phaseFilter === "active"
+    ? phases.filter((phase) => phase.status === "active")
+    : phases;
+
+  async function loadPhases(preferredId?: number) {
+    setPhaseLoading(true);
+    setError("");
+    try {
+      const data = await api.getPhases();
+      setPhases(data);
+      setSelectedPhaseId((current) => {
+        const nextId = preferredId ?? current;
+        return data.some((phase) => phase.id === nextId) ? nextId : (data[0]?.id ?? null);
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to load phases");
+    } finally {
+      setPhaseLoading(false);
+    }
+  }
+
+  function openNewPhase() {
+    setEditingPhaseId(null);
+    setPhaseDraft(emptyPhaseDraft());
+    setShowPhaseForm(true);
+  }
+
+  function openEditPhase(phase: PhasePlan) {
+    setEditingPhaseId(phase.id);
+    setPhaseDraft({
+      title: phase.title,
+      description: phase.description ?? "",
+      start_date: phase.start_date,
+      end_date: phase.end_date,
+      status: phase.status,
+      progress: String(phase.progress),
+      estimated_focus_hours: String(phase.estimated_focus_minutes / 60),
+      notes: phase.notes ?? "",
+    });
+    setShowPhaseForm(true);
+  }
+
+  async function savePhase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPhaseBusy(true);
+    setError("");
+    try {
+      const payload = {
+        title: phaseDraft.title.trim(),
+        description: phaseDraft.description.trim() || null,
+        start_date: phaseDraft.start_date,
+        end_date: phaseDraft.end_date,
+        status: phaseDraft.status,
+        progress: Number(phaseDraft.progress),
+        estimated_focus_minutes: Math.round(Number(phaseDraft.estimated_focus_hours) * 60),
+        notes: phaseDraft.notes.trim() || null,
+      };
+      const saved = editingPhaseId
+        ? await api.updatePhase(editingPhaseId, payload)
+        : await api.createPhase(payload);
+      setShowPhaseForm(false);
+      setPhaseFilter(saved.status === "active" ? "active" : "all");
+      setMessage(editingPhaseId ? "Phase updated." : "Phase created.");
+      await loadPhases(saved.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save phase");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  async function deleteSelectedPhase() {
+    if (!selectedPhase || !window.confirm(`Delete "${selectedPhase.title}" and all of its milestones?`)) return;
+    setPhaseBusy(true);
+    try {
+      await api.deletePhase(selectedPhase.id);
+      setMessage("Phase deleted.");
+      await loadPhases();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to delete phase");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  function openNewMilestone() {
+    setEditingMilestoneId(null);
+    setMilestoneDraft(emptyMilestoneDraft());
+    setShowMilestoneForm(true);
+  }
+
+  function openEditMilestone(milestone: PhaseMilestone) {
+    setEditingMilestoneId(milestone.id);
+    setMilestoneDraft({
+      title: milestone.title,
+      description: milestone.description ?? "",
+      due_date: milestone.due_date ?? "",
+      status: milestone.status,
+      progress: String(milestone.progress),
+    });
+    setShowMilestoneForm(true);
+  }
+
+  async function saveMilestone(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPhase) return;
+    setPhaseBusy(true);
+    setError("");
+    try {
+      const payload = {
+        title: milestoneDraft.title.trim(),
+        description: milestoneDraft.description.trim() || null,
+        due_date: milestoneDraft.due_date || null,
+        status: milestoneDraft.status,
+        progress: Number(milestoneDraft.progress),
+      };
+      if (editingMilestoneId) {
+        await api.updateMilestone(selectedPhase.id, editingMilestoneId, payload);
+      } else {
+        await api.createMilestone(selectedPhase.id, payload);
+      }
+      setShowMilestoneForm(false);
+      setMessage(editingMilestoneId ? "Milestone updated." : "Milestone added.");
+      await loadPhases(selectedPhase.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save milestone");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  async function deleteMilestone(milestone: PhaseMilestone) {
+    if (!selectedPhase || !window.confirm(`Delete "${milestone.title}"?`)) return;
+    setPhaseBusy(true);
+    try {
+      await api.deleteMilestone(selectedPhase.id, milestone.id);
+      setMessage("Milestone deleted.");
+      await loadPhases(selectedPhase.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to delete milestone");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  async function setMilestoneStatus(milestone: PhaseMilestone, status: MilestoneStatus) {
+    if (!selectedPhase) return;
+    setPhaseBusy(true);
+    try {
+      await api.updateMilestone(selectedPhase.id, milestone.id, { status });
+      await loadPhases(selectedPhase.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update milestone");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  async function savePhaseNotes() {
+    if (!selectedPhase) return;
+    setPhaseBusy(true);
+    try {
+      await api.updatePhase(selectedPhase.id, { notes: notesDraft.trim() || null });
+      setMessage("Phase notes saved.");
+      await loadPhases(selectedPhase.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save notes");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  async function saveFocusEstimate() {
+    if (!selectedPhase) return;
+    setPhaseBusy(true);
+    try {
+      await api.updatePhase(selectedPhase.id, {
+        estimated_focus_minutes: Math.round(Number(focusHoursDraft) * 60),
+      });
+      setMessage("Focus-time estimate saved.");
+      await loadPhases(selectedPhase.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save focus time");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
 
   async function selectWeek(anchor: string) {
     setMessage("");
@@ -139,49 +421,94 @@ export default function WeeklyPlanPage() {
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!week) return;
-    const today = localToday();
-    const taskDate = today >= week.week_start && today <= week.week_end ? today : week.week_start;
-    setBusy(true);
-    try {
-      await api.createTask({
-        title: taskTitle,
-        task_date: taskDate,
-        estimated_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null,
-        priority: taskPriority,
-        weekly_goal_id: goals.find((goal) => goal.status === "active")?.id ?? null,
-        source: "manual",
-      });
-      setTaskTitle("");
-      setShowTaskForm(false);
-      setMessage("Priority added to the weekly plan.");
-      await loadPlan(weekAnchor);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to add priority");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function completeTask(task: DailyTask) {
-    setBusy(true);
-    try {
-      await api.updateTask(task.id, { status: "completed" });
-      setMessage(`Completed: ${task.title}`);
-      await loadPlan(weekAnchor);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to complete priority");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteTask(task: DailyTask) {
-    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
     setBusy(true);
     setError("");
     try {
-      await api.deleteTask(task.id);
-      setMessage(`Deleted: ${task.title}`);
+      const goalData = {
+        title: taskTitle,
+        target_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null,
+        priority: taskPriority,
+      };
+      if (editingTaskId) {
+        await api.updateGoal(editingTaskId, goalData);
+      } else {
+        await api.createGoal({
+          ...goalData,
+          week_start: week.week_start,
+          week_end: week.week_end,
+        });
+      }
+      setTaskTitle("");
+      setTaskHours("1");
+      setTaskPriority("high");
+      setEditingTaskId(null);
+      setShowTaskForm(false);
+      setMessage(editingTaskId ? "Priority updated." : "Priority added to the weekly plan.");
+      await loadPlan(weekAnchor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save priority");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function editTask(goal: WeeklyGoal) {
+    setEditingTaskId(goal.id);
+    setTaskTitle(goal.title);
+    setTaskHours(goal.target_minutes ? String(goal.target_minutes / 60) : "1");
+    setTaskPriority(goal.priority);
+    setShowTaskForm(true);
+  }
+
+  function cancelTaskForm() {
+    setEditingTaskId(null);
+    setTaskTitle("");
+    setTaskHours("1");
+    setTaskPriority("high");
+    setShowTaskForm(false);
+  }
+
+  async function toggleTaskCompleted(goal: WeeklyGoal) {
+    setBusy(true);
+    try {
+      const completing = goal.status !== "completed";
+      await api.updateGoal(goal.id, { status: completing ? "completed" : "active" });
+      setMessage(completing ? `Completed: ${goal.title}` : `Reopened: ${goal.title}`);
+      await loadPlan(weekAnchor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update priority");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleSelectedPhaseCompleted() {
+    if (!selectedPhase) return;
+    const completing = selectedPhase.status !== "completed";
+    setPhaseBusy(true);
+    setError("");
+    try {
+      await api.updatePhase(selectedPhase.id, {
+        status: completing ? "completed" : "active",
+        ...(completing ? { progress: 100 } : {}),
+      });
+      setMessage(completing ? `Completed: ${selectedPhase.title}` : `Reopened: ${selectedPhase.title}`);
+      if (completing) setPhaseFilter("all");
+      await loadPhases(selectedPhase.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update phase");
+    } finally {
+      setPhaseBusy(false);
+    }
+  }
+
+  async function deleteTask(goal: WeeklyGoal) {
+    if (!window.confirm(`Delete "${goal.title}" from this weekly plan?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateGoal(goal.id, { status: "cancelled" });
+      setMessage(`Deleted: ${goal.title}`);
       await loadPlan(weekAnchor);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to delete priority");
@@ -193,7 +520,10 @@ export default function WeeklyPlanPage() {
   return (
     <section className="plans-page weekly-reference-page">
       <header className="plans-header">
-        <div><h1>Weekly Plan</h1><p>Stay aligned with your goals. Adjust on the day, guided by AI.</p></div>
+        <div>
+          <h1>{activeTab === "phase" ? "Phase Plan" : "Weekly Plan"}</h1>
+          <p>{activeTab === "phase" ? "Break down long-term goals into phases and milestones." : "Stay aligned with your goals. Adjust on the day, guided by AI."}</p>
+        </div>
         <div className="plans-header-actions">
           <Link aria-label="Open calendar" href="/today"><PlanIcon name="calendar" size={20} /></Link>
           <Link className="plans-coach-button" href="/check-in"><PlanIcon name="spark" /> Ask my coach <span>⌄</span></Link>
@@ -209,10 +539,159 @@ export default function WeeklyPlanPage() {
       {message ? <div className="success plans-feedback">{message}</div> : null}
 
       {activeTab === "phase" ? (
-        <div className="phase-plan-view">
-          <div><p className="eyebrow">Phase plan</p><h2>Build the next phase from weekly outcomes</h2><p>Use completed weeks as the foundation for your next longer planning cycle.</p></div>
-          <button className="outline-purple" onClick={() => setActiveTab("weekly")} type="button">Return to weekly plan</button>
-        </div>
+        <main className="phase-plan-content">
+          <div className="phase-toolbar">
+            <div className="phase-filter" role="group" aria-label="Filter phases">
+              <button className={phaseFilter === "active" ? "active" : ""} onClick={() => setPhaseFilter("active")} type="button">Active Phases</button>
+              <button className={phaseFilter === "all" ? "active" : ""} onClick={() => setPhaseFilter("all")} type="button">All Phases</button>
+            </div>
+            <button className="new-phase-button" onClick={openNewPhase} type="button"><PlanIcon name="plus" size={14} /> New Phase</button>
+          </div>
+
+          <section className="phase-card-grid" aria-label="Phase summaries">
+            {phaseLoading && phases.length === 0 ? <p className="phase-loading-message">Loading phases…</p> : null}
+            {!phaseLoading && visiblePhases.length === 0 ? (
+              <div className="phase-zero-state">
+                <PlanIcon name="flag" size={24} />
+                <strong>{phaseFilter === "active" && phases.length ? "No active phases" : "Create your first phase"}</strong>
+                <p>Turn a long-term goal into a dated plan with measurable milestones.</p>
+                <button onClick={openNewPhase} type="button"><PlanIcon name="plus" size={14} /> New Phase</button>
+              </div>
+            ) : null}
+            {visiblePhases.map((phase) => (
+              <button className={`phase-summary-card ${selectedPhaseId === phase.id ? "selected" : ""} ${phase.status === "completed" ? "completed" : ""}`} key={phase.id} onClick={() => setSelectedPhaseId(phase.id)} type="button">
+                <div className="phase-card-title"><i /><strong>{phase.title}</strong></div>
+                <div className="phase-card-meta"><span>{formatPhaseRange(phase)}</span><b className={phase.status === "active" ? "on-track" : "planning"}>{phaseStatusLabel(phase.status)}</b></div>
+                <div className="phase-progress"><span><i style={{ width: `${phase.progress}%` }} /></span><strong>{phase.progress}%</strong></div>
+                <div className="phase-card-stats">
+                  <span><PlanIcon name="flag" size={14} /> Milestones <b><PlanIcon name="people" size={13} /> {phase.milestones.filter((milestone) => milestone.status === "completed").length} / {phase.milestones.length}</b></span>
+                  <span><PlanIcon name="clock" size={14} /> Est. Focus Time <b><PlanIcon name="clock" size={13} /> {formatHours(phase.estimated_focus_minutes)}</b></span>
+                </div>
+              </button>
+            ))}
+          </section>
+
+          {selectedPhase ? <section className="phase-detail-card">
+            <header className="phase-detail-header">
+              <div className="phase-detail-title">
+                <button aria-label={selectedPhase.status === "completed" ? `Reopen ${selectedPhase.title}` : `Complete ${selectedPhase.title}`} className={`plan-completion-toggle ${selectedPhase.status === "completed" ? "completed" : ""}`} disabled={phaseBusy} onClick={toggleSelectedPhaseCompleted} title={selectedPhase.status === "completed" ? "Reopen phase" : "Mark phase complete"} type="button">{selectedPhase.status === "completed" ? <PlanIcon name="check" size={12} /> : null}</button>
+                <h2>{selectedPhase.title}</h2>
+                <button aria-label="Edit phase" onClick={() => openEditPhase(selectedPhase)} type="button"><PlanIcon name="edit" size={16} /></button>
+                <span>{formatPhaseRange(selectedPhase)}</span>
+                <b className={selectedPhase.status === "active" ? "on-track" : "planning"}>{phaseStatusLabel(selectedPhase.status)}</b>
+              </div>
+              <div className="phase-detail-progress">
+                <span>Progress</span>
+                <div><i style={{ width: `${selectedPhase.progress}%` }} /></div>
+                <strong>{selectedPhase.progress}%</strong>
+              </div>
+              <button aria-label="Delete phase" className="phase-more-button" disabled={phaseBusy} onClick={deleteSelectedPhase} title="Delete phase" type="button"><PlanIcon name="trash" size={16} /></button>
+            </header>
+
+            <div className="phase-detail-tabs" role="tablist">
+              {([
+                ["milestones", "Milestones"],
+                ["tasks", "Tasks Overview"],
+                ["focus", "Focus Time"],
+                ["notes", "Notes"],
+              ] as const).map(([tab, label]) => (
+                <button aria-selected={phaseDetailTab === tab} className={phaseDetailTab === tab ? "active" : ""} key={tab} onClick={() => setPhaseDetailTab(tab)} role="tab" type="button">{label}</button>
+              ))}
+            </div>
+
+            {phaseDetailTab === "milestones" ? (
+              <div className="milestone-table-wrap">
+                <div className="milestone-table-head">
+                  <span>Milestone</span><span>Due Date</span><span>Progress</span><span>Status</span>
+                </div>
+                <div className="milestone-list">
+                  {selectedPhase.milestones.length === 0 ? <p className="milestone-empty">No milestones yet. Add the first outcome for this phase.</p> : null}
+                  {selectedPhase.milestones.map((milestone) => (
+                    <div className={`milestone-row ${milestone.status === "completed" ? "completed" : ""}`} key={milestone.id}>
+                      <button aria-label={milestone.status === "completed" ? `Reopen ${milestone.title}` : `Complete ${milestone.title}`} className={`plan-completion-toggle milestone-completion-toggle ${milestone.status === "completed" ? "completed" : ""}`} disabled={phaseBusy} onClick={() => setMilestoneStatus(milestone, milestone.status === "completed" ? "in_progress" : "completed")} title={milestone.status === "completed" ? "Reopen milestone" : "Mark milestone complete"} type="button">{milestone.status === "completed" ? <PlanIcon name="check" size={12} /> : null}</button>
+                      <div className="milestone-name"><strong>{milestone.title}</strong><small>{milestone.description || "No description"}</small></div>
+                      <time>{milestone.due_date ? formatPhaseDate(milestone.due_date) : "Not scheduled"}</time>
+                      <div className="milestone-progress"><span><i style={{ width: `${milestone.progress}%` }} /></span><b>{milestone.progress}%</b></div>
+                      <div className="milestone-status-cell">
+                        <span className={`milestone-status ${milestone.status.replaceAll("_", "-")}`}>{milestoneStatusLabel(milestone.status)}</span>
+                        <button aria-label={`Edit ${milestone.title}`} disabled={phaseBusy} onClick={() => openEditMilestone(milestone)} title="Edit milestone" type="button"><PlanIcon name="edit" size={14} /></button>
+                        <button aria-label={`Delete ${milestone.title}`} disabled={phaseBusy} onClick={() => deleteMilestone(milestone)} title="Delete milestone" type="button"><PlanIcon name="trash" size={14} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button className="add-milestone-button" onClick={openNewMilestone} type="button"><PlanIcon name="plus" size={14} /> Add Milestone</button>
+              </div>
+            ) : phaseDetailTab === "tasks" ? (
+              <div className="phase-functional-panel">
+                <div className="phase-panel-heading"><div><h3>Milestone execution</h3><p>Update each outcome as work moves forward.</p></div><button onClick={openNewMilestone} type="button"><PlanIcon name="plus" size={14} /> Add task</button></div>
+                <div className="phase-task-list">
+                  {selectedPhase.milestones.map((milestone) => (
+                    <div className="phase-task-row" key={milestone.id}>
+                      <button aria-label={`Mark ${milestone.title} complete`} className={milestone.status === "completed" ? "complete" : ""} disabled={phaseBusy} onClick={() => setMilestoneStatus(milestone, milestone.status === "completed" ? "in_progress" : "completed")} type="button"><PlanIcon name="check" size={15} /></button>
+                      <span><strong>{milestone.title}</strong><small>{milestone.due_date ? `Due ${formatPhaseDate(milestone.due_date)}` : "No due date"}</small></span>
+                      <select aria-label={`Status for ${milestone.title}`} disabled={phaseBusy} onChange={(event) => setMilestoneStatus(milestone, event.target.value as MilestoneStatus)} value={milestone.status}>
+                        <option value="not_started">Not Started</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
+                  ))}
+                  {selectedPhase.milestones.length === 0 ? <p className="milestone-empty">Add a milestone to start tracking execution.</p> : null}
+                </div>
+              </div>
+            ) : phaseDetailTab === "focus" ? (
+              <div className="phase-functional-panel">
+                <div className="phase-panel-heading"><div><h3>Focus-time estimate</h3><p>Set the total deep-work time you expect this phase to need.</p></div></div>
+                <div className="phase-focus-editor">
+                  <label><span>Estimated hours</span><input min="0" onChange={(event) => setFocusHoursDraft(event.target.value)} step="0.5" type="number" value={focusHoursDraft} /></label>
+                  <div><strong>{formatHours(selectedPhase.estimated_focus_minutes)}</strong><span>currently planned</span></div>
+                  <button disabled={phaseBusy} onClick={saveFocusEstimate} type="button">Save estimate</button>
+                </div>
+              </div>
+            ) : (
+              <div className="phase-functional-panel">
+                <div className="phase-panel-heading"><div><h3>Phase notes</h3><p>Capture decisions, context, and reminders for this phase.</p></div></div>
+                <textarea aria-label="Phase notes" onChange={(event) => setNotesDraft(event.target.value)} placeholder="Add notes for this phase…" rows={7} value={notesDraft} />
+                <button className="phase-save-button" disabled={phaseBusy} onClick={savePhaseNotes} type="button">Save notes</button>
+              </div>
+            )}
+          </section> : null}
+
+          {showPhaseForm ? (
+            <div aria-modal="true" className="phase-dialog-backdrop" role="dialog">
+              <form className="phase-dialog" onSubmit={savePhase}>
+                <header><div><h2>{editingPhaseId ? "Edit Phase" : "New Phase"}</h2><p>Define the outcome, dates, and expected investment.</p></div><button aria-label="Close phase form" onClick={() => setShowPhaseForm(false)} type="button">×</button></header>
+                <div className="phase-dialog-fields">
+                  <label className="wide"><span>Phase name</span><input autoFocus maxLength={255} onChange={(event) => setPhaseDraft({ ...phaseDraft, title: event.target.value })} required value={phaseDraft.title} /></label>
+                  <label className="wide"><span>Description</span><textarea onChange={(event) => setPhaseDraft({ ...phaseDraft, description: event.target.value })} rows={3} value={phaseDraft.description} /></label>
+                  <label><span>Start date</span><input onChange={(event) => setPhaseDraft({ ...phaseDraft, start_date: event.target.value })} required type="date" value={phaseDraft.start_date} /></label>
+                  <label><span>End date</span><input min={phaseDraft.start_date} onChange={(event) => setPhaseDraft({ ...phaseDraft, end_date: event.target.value })} required type="date" value={phaseDraft.end_date} /></label>
+                  <label><span>Status</span><select onChange={(event) => setPhaseDraft({ ...phaseDraft, status: event.target.value as PhaseStatus })} value={phaseDraft.status}><option value="planning">Planning</option><option value="active">Active</option><option value="completed">Completed</option><option value="archived">Archived</option></select></label>
+                  <label><span>Progress (%)</span><input max="100" min="0" onChange={(event) => setPhaseDraft({ ...phaseDraft, progress: event.target.value })} required type="number" value={phaseDraft.progress} /></label>
+                  <label className="wide"><span>Estimated focus hours</span><input min="0" onChange={(event) => setPhaseDraft({ ...phaseDraft, estimated_focus_hours: event.target.value })} required step="0.5" type="number" value={phaseDraft.estimated_focus_hours} /></label>
+                </div>
+                <footer><button onClick={() => setShowPhaseForm(false)} type="button">Cancel</button><button disabled={phaseBusy} type="submit">{phaseBusy ? "Saving…" : editingPhaseId ? "Save changes" : "Create phase"}</button></footer>
+              </form>
+            </div>
+          ) : null}
+
+          {showMilestoneForm ? (
+            <div aria-modal="true" className="phase-dialog-backdrop" role="dialog">
+              <form className="phase-dialog milestone-dialog" onSubmit={saveMilestone}>
+                <header><div><h2>{editingMilestoneId ? "Edit Milestone" : "Add Milestone"}</h2><p>Define a measurable outcome inside {selectedPhase?.title}.</p></div><button aria-label="Close milestone form" onClick={() => setShowMilestoneForm(false)} type="button">×</button></header>
+                <div className="phase-dialog-fields">
+                  <label className="wide"><span>Milestone name</span><input autoFocus maxLength={255} onChange={(event) => setMilestoneDraft({ ...milestoneDraft, title: event.target.value })} required value={milestoneDraft.title} /></label>
+                  <label className="wide"><span>Description</span><textarea onChange={(event) => setMilestoneDraft({ ...milestoneDraft, description: event.target.value })} rows={3} value={milestoneDraft.description} /></label>
+                  <label><span>Due date</span><input onChange={(event) => setMilestoneDraft({ ...milestoneDraft, due_date: event.target.value })} type="date" value={milestoneDraft.due_date} /></label>
+                  <label><span>Status</span><select onChange={(event) => setMilestoneDraft({ ...milestoneDraft, status: event.target.value as MilestoneStatus })} value={milestoneDraft.status}><option value="not_started">Not Started</option><option value="in_progress">In Progress</option><option value="completed">Completed</option></select></label>
+                  <label className="wide"><span>Progress (%)</span><input max="100" min="0" onChange={(event) => setMilestoneDraft({ ...milestoneDraft, progress: event.target.value })} required type="number" value={milestoneDraft.progress} /></label>
+                </div>
+                <footer><button onClick={() => setShowMilestoneForm(false)} type="button">Cancel</button><button disabled={phaseBusy} type="submit">{phaseBusy ? "Saving…" : editingMilestoneId ? "Save changes" : "Add milestone"}</button></footer>
+              </form>
+            </div>
+          ) : null}
+        </main>
       ) : (
         <main className="weekly-reference-content">
           <nav aria-label="Select week" className="week-selector">
@@ -231,11 +710,11 @@ export default function WeeklyPlanPage() {
             <div className="week-overview-grid">
               <div><span>Weekly Goal</span><strong>{targetMinutes ? formatHours(targetMinutes) : "—"}</strong><small>Focus time</small></div>
               <div><span>Planned Focus</span><strong>{formatHours(plannedMinutes)}</strong><small>{targetMinutes ? `${planVsGoal}% of goal` : "Set a goal below"}</small></div>
-              <div><span>Tasks</span><strong>{week?.planned_tasks ?? 0}</strong><small>Planned</small></div>
+              <div><span>Tasks</span><strong>{goals.length}</strong><small>Weekly priorities</small></div>
               <div><span>Priority Tasks</span><strong>{highPriorityCount}</strong><small>High impact</small></div>
               <div className="overview-progress">
                 <i style={{ background: `conic-gradient(#24a84b ${completion * 3.6}deg, #e7eee8 0deg)` }}><b>{completion}%</b></i>
-                <span><strong>Overall Progress</strong><small>{week?.completed_tasks ?? 0} of {week?.planned_tasks ?? 0} completed</small></span>
+                <span><strong>Overall Progress</strong><small>{completedPriorities} of {goals.length} completed · weighted by priority and hours</small></span>
               </div>
             </div>
           </section>
@@ -248,25 +727,25 @@ export default function WeeklyPlanPage() {
               <div className="reference-priority-list">
                 {loading ? <p>Loading priorities…</p> : null}
                 {!loading && priorities.length === 0 ? <p>No priorities yet. Add the first meaningful task for this week.</p> : null}
-                {priorities.map((task, index) => (
+                {priorities.map((task) => (
                   <div className={task.status === "completed" ? "completed" : ""} key={task.id}>
-                    <span className="priority-index">{index + 1}</span>
+                    <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className={`plan-completion-toggle ${task.status === "completed" ? "completed" : ""}`} disabled={busy} onClick={() => toggleTaskCompleted(task)} title={task.status === "completed" ? "Reopen priority" : "Mark priority complete"} type="button">{task.status === "completed" ? <PlanIcon name="check" size={12} /> : null}</button>
                     <span className="priority-title">{task.title}</span>
                     <b className={task.priority}>{task.priority}</b>
-                    <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
+                    <small>{task.target_minutes ? `Est. ${formatHours(task.target_minutes)}` : "Flexible"}</small>
                     <div className="priority-row-actions">
-                      <button aria-label={task.status === "completed" ? `Completed ${task.title}` : `Done ${task.title}`} className="priority-done-button" disabled={busy || task.status === "completed"} onClick={() => completeTask(task)} title={task.status === "completed" ? "Completed" : "Mark done"} type="button"><PlanIcon name="check" size={17} /></button>
+                      <button aria-label={`Edit ${task.title}`} className="priority-edit-button" disabled={busy} onClick={() => editTask(task)} title="Edit priority" type="button"><PlanIcon name="edit" size={17} /></button>
                       <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete priority" type="button"><PlanIcon name="trash" size={17} /></button>
                     </div>
                   </div>
                 ))}
-                {!showTaskForm ? <button className="add-priority-button" onClick={() => setShowTaskForm(true)} type="button"><PlanIcon name="plus" size={14} /> Add Priority</button> : null}
+                {!showTaskForm ? <button className="add-priority-button" onClick={() => { setEditingTaskId(null); setShowTaskForm(true); }} type="button"><PlanIcon name="plus" size={14} /> Add Priority</button> : null}
                 {showTaskForm ? <form className="reference-task-form" onSubmit={createTask}>
                   <input maxLength={255} placeholder="Priority title" required value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
                   <input aria-label="Estimated hours" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} />
                   <select aria-label="Priority level" value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
-                  <button disabled={busy} type="submit">Save priority</button>
-                  <button onClick={() => setShowTaskForm(false)} type="button">Cancel</button>
+                  <button disabled={busy} type="submit">{editingTaskId ? "Save changes" : "Save priority"}</button>
+                  <button onClick={cancelTaskForm} type="button">Cancel</button>
                 </form> : null}
               </div>
               <aside className="weekly-ai-suggestion">

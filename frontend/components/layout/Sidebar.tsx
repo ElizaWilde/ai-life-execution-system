@@ -33,6 +33,7 @@ export default function Sidebar() {
   return <aside className="sidebar">
     <Link href="/dashboard" className="brand-lockup"><span className="brand-spark">✦</span><span><strong>AI Life</strong><small>Execution System</small></span></Link>
     <nav>{navItems.map((item) => <Link key={item.href} href={item.href} className={`nav-link ${pathname === item.href ? "active" : ""}`}><NavIcon name={item.icon} />{item.label}</Link>)}</nav>
+    <Link className="sidebar-coach" href="/check-in"><NavIcon name="spark" /> Ask AI Coach</Link>
     <div className="sidebar-user"><span className="user-avatar">{initials}</span><div><strong>{settings.name}</strong><small>{settings.email}</small></div><b>⌄</b></div>
   </aside>;
 }

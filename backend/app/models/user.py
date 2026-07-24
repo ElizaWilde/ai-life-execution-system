@@ -71,6 +71,10 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    phases: Mapped[list["Phase"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     app_setting: Mapped["UserAppSetting | None"] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",

@@ -3,12 +3,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, DailyTask, StudySession } from "../../lib/api";
 import {
+  FOCUS_TIMER_KEY,
+  SharedFocusTimerState,
+  pauseSharedFocusTimer,
+  readSharedFocusTimer,
+  remainingSecondsAt,
+  resumeSharedFocusTimer,
+  startSharedFocusTimer,
+  stopSharedFocusTimer,
+} from "../../lib/focus-timer-sync";
+import {
   AppSettings,
   defaultSettings,
   loadAppSettings,
   saveAppSettings,
   useAppSettings,
 } from "../../lib/settings";
+import { playTimerCompleteSound, primeTimerSound } from "../../lib/timer-sound";
 
 type TimerPreferenceKey = "focusMinutes" | "shortBreak" | "longBreak" | "cycleCount";
 
@@ -34,15 +45,24 @@ export default function TimerPage() {
   const [subject, setSubject] = useState("");
   const [notes, setNotes] = useState("");
   const [running, setRunning] = useState<StudySession | null>(null);
+  const [sharedTimer, setSharedTimer] = useState<SharedFocusTimerState | null>(null);
+  const runningRef = useRef<StudySession | null>(null);
+  const sharedLoadBusyRef = useRef(false);
+  const lastSoundedEndAtRef = useRef<number | null>(null);
+  runningRef.current = running;
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState("");
   const [preferenceMessage, setPreferenceMessage] = useState("");
   const settingsSyncQueue = useRef<Promise<void>>(Promise.resolve());
 
-  const elapsedSeconds = useMemo(() => {
-    if (!running) return 0;
-    return Math.max(0, Math.floor((now - new Date(running.started_at).getTime()) / 1000));
-  }, [now, running]);
+  const sessionRemainingSeconds = useMemo(() => {
+    if (!running) return targetSeconds;
+    if (sharedTimer?.studySessionId === running.id) {
+      return remainingSecondsAt(sharedTimer, now);
+    }
+    const elapsed = Math.max(0, Math.floor((now - new Date(running.started_at).getTime()) / 1000));
+    return Math.max(0, targetSeconds - elapsed);
+  }, [now, running, sharedTimer, targetSeconds]);
 
   async function load() {
     try {
@@ -52,7 +72,18 @@ export default function TimerPage() {
       ]);
       setTasks(loadedTasks);
       setSessions(loadedSessions);
-      setRunning(loadedSessions.find((session) => session.status === "running") || null);
+      const activeSession = loadedSessions.find((session) => session.status === "running") || null;
+      setRunning(activeSession);
+      const configuredSeconds = Math.max(1, Number(loadAppSettings().focusMinutes) || 25) * 60;
+      let nextSharedTimer = readSharedFocusTimer();
+      if (activeSession && nextSharedTimer?.studySessionId !== activeSession.id) {
+        startSharedFocusTimer(configuredSeconds, activeSession.started_at, activeSession.id);
+        nextSharedTimer = readSharedFocusTimer();
+      } else if (!activeSession && nextSharedTimer?.studySessionId) {
+        stopSharedFocusTimer(configuredSeconds);
+        nextSharedTimer = readSharedFocusTimer();
+      }
+      setSharedTimer(nextSharedTimer);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load timer data");
     }
@@ -65,6 +96,34 @@ export default function TimerPage() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !running ||
+      !sharedTimer?.running ||
+      sharedTimer.endAt === null ||
+      sessionRemainingSeconds !== 0 ||
+      lastSoundedEndAtRef.current === sharedTimer.endAt
+    ) return;
+    lastSoundedEndAtRef.current = sharedTimer.endAt;
+    void playTimerCompleteSound(sharedTimer.endAt);
+  }, [running, sessionRemainingSeconds, sharedTimer]);
+
+  useEffect(() => {
+    const syncSharedTimer = (event: StorageEvent) => {
+      if (event.key !== FOCUS_TIMER_KEY) return;
+      const next = readSharedFocusTimer();
+      setSharedTimer(next);
+      if (next?.studySessionId !== runningRef.current?.id && !sharedLoadBusyRef.current) {
+        sharedLoadBusyRef.current = true;
+        void load().finally(() => {
+          sharedLoadBusyRef.current = false;
+        });
+      }
+    };
+    window.addEventListener("storage", syncSharedTimer);
+    return () => window.removeEventListener("storage", syncSharedTimer);
   }, []);
 
   function syncTimerPreferences() {
@@ -111,12 +170,15 @@ export default function TimerPage() {
 
   async function startSession() {
     setError("");
+    void primeTimerSound();
     try {
       const selectedTask = tasks.find((task) => String(task.id) === selectedTaskId);
       const session = await api.startSession({
         daily_task_id: selectedTaskId ? Number(selectedTaskId) : null,
         subject: subject.trim() || selectedTask?.title || "Focus session",
       });
+      startSharedFocusTimer(targetSeconds, session.started_at, session.id);
+      setSharedTimer(readSharedFocusTimer());
       setRunning(session);
       await load();
     } catch (err) {
@@ -129,6 +191,9 @@ export default function TimerPage() {
     setError("");
     try {
       await api.finishSession({ session_id: running.id, notes: notes || null });
+      void playTimerCompleteSound(sharedTimer?.endAt ?? `session-finish-${running.id}-${Date.now()}`);
+      stopSharedFocusTimer(targetSeconds);
+      setSharedTimer(readSharedFocusTimer());
       setRunning(null);
       setNotes("");
       await load();
@@ -137,8 +202,28 @@ export default function TimerPage() {
     }
   }
 
-  const minutes = Math.floor(elapsedSeconds / 60);
-  const seconds = elapsedSeconds % 60;
+  function toggleSessionTimer() {
+    if (!running) return;
+    void primeTimerSound();
+    const current = readSharedFocusTimer();
+    if (current?.studySessionId !== running.id) {
+      startSharedFocusTimer(targetSeconds, running.started_at, running.id);
+    } else if (current.running) {
+      pauseSharedFocusTimer();
+    } else {
+      resumeSharedFocusTimer();
+    }
+    setSharedTimer(readSharedFocusTimer());
+    setNow(Date.now());
+  }
+
+  const minutes = Math.floor(sessionRemainingSeconds / 60);
+  const seconds = sessionRemainingSeconds % 60;
+  const timerIsRunning = Boolean(
+    running &&
+    sharedTimer?.studySessionId === running.id &&
+    sharedTimer.running,
+  );
 
   return (
     <section className="page timer-workspace-page">
@@ -156,7 +241,7 @@ export default function TimerPage() {
       <div className="timer-workspace-grid">
         <div className="timer-workspace-left">
           <article className="card timer-session-card">
-            <h2>{running ? "Running session" : "Start session"}</h2>
+            <h2>{running ? (timerIsRunning ? "Running session" : "Paused session") : "Start session"}</h2>
             <p className="stat">{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</p>
             <p className="muted timer-session-meta">Timer · {targetMinutes}:00 · {selectedTaskId ? tasks.find((task) => String(task.id) === selectedTaskId)?.title : "No task set"}</p>
             <div className="form timer-session-form">
@@ -164,8 +249,17 @@ export default function TimerPage() {
               <label className="field"><span>Subject</span><input className="input" disabled={Boolean(running)} placeholder="Optional subject" value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
               {running ? <label className="field"><span>Finish notes</span><textarea className="input" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label> : null}
             </div>
-            <div className="actions timer-session-actions">{!running ? <button className="button primary" onClick={startSession}>Start {targetMinutes} min session</button> : <button className="button danger" onClick={finishSession}>Finish session</button>}</div>
-            {running && elapsedSeconds >= targetSeconds ? <p className="success">Focus target reached. Finish when you are ready.</p> : null}
+            <div className="actions timer-session-actions">
+              {!running ? (
+                <button className="button primary" onClick={startSession}>Start {targetMinutes} min session</button>
+              ) : (
+                <>
+                  <button className="button primary" onClick={toggleSessionTimer}>{timerIsRunning ? "Pause" : "Resume"}</button>
+                  <button className="button danger" onClick={finishSession}>Finish session</button>
+                </>
+              )}
+            </div>
+            {running && sessionRemainingSeconds === 0 ? <p className="success">Focus target reached. Finish when you are ready.</p> : null}
           </article>
 
           <article className="card timer-preferences-card">

@@ -69,6 +69,7 @@ export default function TodayPage() {
   const [dashboard, setDashboard] = useState<TodayDashboard | null>(null);
   const [generatedPlan, setGeneratedPlan] = useState<AdaptiveDailyPlan | null>(null);
   const [showAddTask, setShowAddTask] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -135,8 +136,22 @@ export default function TodayPage() {
     setBusy(true);
     setError("");
     try {
-      await api.createTask({ title, task_date: today, estimated_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null, priority, source: "manual" });
+      const taskData = {
+        title,
+        estimated_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null,
+        priority,
+      };
+      if (editingTaskId) {
+        await api.updateTask(editingTaskId, taskData);
+        setMessage("Task updated.");
+      } else {
+        await api.createTask({ ...taskData, task_date: today, source: "manual" });
+        setMessage("Task added.");
+      }
       setTitle("");
+      setTaskHours("0.5");
+      setPriority("medium");
+      setEditingTaskId(null);
       setShowAddTask(false);
       await loadToday();
     } catch (reason) {
@@ -144,6 +159,22 @@ export default function TodayPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function editTask(task: DailyTask) {
+    setEditingTaskId(task.id);
+    setTitle(task.title);
+    setTaskHours(task.estimated_minutes ? String(task.estimated_minutes / 60) : "0.5");
+    setPriority(task.priority);
+    setShowAddTask(true);
+  }
+
+  function cancelTaskForm() {
+    setEditingTaskId(null);
+    setTitle("");
+    setTaskHours("0.5");
+    setPriority("medium");
+    setShowAddTask(false);
   }
 
   async function setStatus(task: DailyTask, status: DailyTask["status"]) {
@@ -247,18 +278,18 @@ export default function TodayPage() {
             <div className="today-work-list">
               {loading ? <p className="today-empty">Loading today’s plan…</p> : null}
               {!loading && !sortedTasks.length ? <p className="today-empty">No tasks yet. Add the first task for today.</p> : null}
-              {sortedTasks.map((task, index) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""}`} key={task.id}>
-                <span className="priority-index">{index + 1}</span>
+              {sortedTasks.map((task) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""}`} key={task.id}>
+                <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className={`plan-completion-toggle ${task.status === "completed" ? "completed" : ""}`} disabled={busy} onClick={() => setStatus(task, task.status === "completed" ? "pending" : "completed")} title={task.status === "completed" ? "Reopen task" : "Mark complete"} type="button">{task.status === "completed" ? <TodayIcon name="check" size={12} /> : null}</button>
                 <span className="priority-title">{task.title}</span>
                 <b className={`today-priority ${task.priority}`}>{task.priority}</b>
                 <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
                 <div className="priority-row-actions">
-                  <button aria-label={task.status === "completed" ? `Completed ${task.title}` : `Done ${task.title}`} className="priority-done-button" disabled={busy || task.status === "completed"} onClick={() => setStatus(task, "completed")} title={task.status === "completed" ? "Completed" : "Mark done"} type="button"><TodayIcon name="check" size={17} /></button>
+                  <button aria-label={`Edit ${task.title}`} className="priority-edit-button" disabled={busy} onClick={() => editTask(task)} title="Edit task" type="button"><TodayIcon name="edit" size={17} /></button>
                   <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete task" type="button"><TodayIcon name="trash" size={17} /></button>
                 </div>
               </article>)}
-              {showAddTask ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">Add task</button><button className="today-add-cancel" onClick={() => setShowAddTask(false)} type="button">Cancel</button></form> : null}
-              {!showAddTask ? <button className="today-add-bottom" onClick={() => setShowAddTask(true)} type="button">＋ Add Task</button> : null}
+              {showAddTask ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">{editingTaskId ? "Save changes" : "Add task"}</button><button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button></form> : null}
+              {!showAddTask ? <button className="today-add-bottom" onClick={() => { setEditingTaskId(null); setShowAddTask(true); }} type="button">＋ Add Task</button> : null}
             </div>
           </section>
 

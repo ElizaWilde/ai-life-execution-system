@@ -71,6 +71,14 @@ from app.schemas.weekly_review import (
     WeeklyReviewGenerateRequest,
     WeeklyReviewRead,
 )
+from app.schemas.phase import (
+    MilestoneCreate,
+    MilestoneRead,
+    MilestoneUpdate,
+    PhaseCreate,
+    PhaseRead,
+    PhaseUpdate,
+)
 
 __all__ = [
     "AutomationPreferenceRead",
@@ -95,12 +103,18 @@ __all__ = [
     "DailyTaskUpdate",
     "EnergyLevel",
     "MoodLevel",
+    "MilestoneCreate",
+    "MilestoneRead",
+    "MilestoneUpdate",
     "NotificationChannel",
     "NotificationRead",
     "NotificationSend",
     "NotificationStatus",
     "NotificationType",
     "StudyPeriod",
+    "PhaseCreate",
+    "PhaseRead",
+    "PhaseUpdate",
     "StudySessionFinish",
     "StudySessionRead",
     "StudySessionStart",

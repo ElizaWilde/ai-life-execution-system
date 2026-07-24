@@ -5,6 +5,7 @@ from app.models.daily_review import DailyReview
 from app.models.daily_task import DailyTask
 from app.models.notification import Notification
 from app.models.parked_thought import ParkedThought
+from app.models.phase import Milestone, Phase
 from app.models.study_session import StudySession
 from app.models.user import User
 from app.models.user_app_setting import UserAppSetting
@@ -22,6 +23,8 @@ __all__ = [
     "DailyTask",
     "Notification",
     "ParkedThought",
+    "Phase",
+    "Milestone",
     "StudySession",
     "User",
     "UserAppSetting",
