@@ -20,6 +20,7 @@ from app.schemas.daily_task import (
     DailyTaskUpdate,
 )
 from app.services.planning_service import MissingActiveWeeklyGoalError, planning_service
+from app.services.task_deadline_service import task_deadline_service
 
 
 # This creates a router object。Later, every decorator using this object adds another route.e.g.@router.post(...)
@@ -73,7 +74,15 @@ def create_daily_task(
 ) -> DailyTask:
     _verify_weekly_goal(payload.weekly_goal_id, user.id, db)
     # creates a SQLAlchemy DailyTask object.
-    task = DailyTask(user_id=user.id, **payload.model_dump())
+    values = payload.model_dump()
+    values["due_at"] = task_deadline_service.calculate(
+        db,
+        user.id,
+        payload.task_date,
+        payload.planning_scope,
+        explicit_due_at=payload.due_at,
+    )
+    task = DailyTask(user_id=user.id, **values)
     # Adds the new object to the current SQLAlchemy session.
     db.add(task)
     # Commits the database transaction.Without commit(), the new data would not normally be permanently committed.
@@ -122,6 +131,7 @@ async def generate_daily_plan(
             user_id=user.id,
             available_minutes=payload.available_minutes,
             task_date=payload.task_date,
+            user_instruction=payload.user_instruction,
         )
     except MissingActiveWeeklyGoalError as exc:
         raise HTTPException(

@@ -71,6 +71,10 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    rescheduling_proposals: Mapped[list["ReschedulingProposal"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     phases: Mapped[list["Phase"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",

@@ -11,6 +11,7 @@ from app.schemas.daily_task import DailyPlanResponse
 from app.services.coaching_context_service import coaching_context_service
 from app.services.llm_service import llm_service
 from app.services.workload_adjustment_service import workload_adjustment_service
+from app.services.task_deadline_service import task_deadline_service
 
 
 VALID_PRIORITIES = {"low", "medium", "high"}
@@ -31,6 +32,7 @@ class PlanningService:
         user_id: int,
         available_minutes: int,
         task_date: date | None = None,
+        user_instruction: str | None = None,
     ) -> DailyPlanResponse:
         plan_date = task_date or date.today()
         context = coaching_context_service.build_daily_context(
@@ -45,7 +47,6 @@ class PlanningService:
         )
 
         weekly_goals = self._get_active_weekly_goals(db, user_id, plan_date)
-        unfinished_tasks = self._get_unfinished_tasks(db, user_id, plan_date)
 
         if not weekly_goals:
             raise MissingActiveWeeklyGoalError(
@@ -53,19 +54,35 @@ class PlanningService:
                 "Create an active weekly goal before generating an AI plan."
             )
 
-        generated_items = await llm_service.generate_daily_plan(
-            weekly_goals=[self._weekly_goal_to_prompt(goal) for goal in weekly_goals],
-            unfinished_tasks=[self._task_to_prompt(task) for task in unfinished_tasks],
-            available_minutes=adjusted_minutes,
+        allowed_goal_ids = {goal.id for goal in weekly_goals}
+        self._remove_pending_ai_plan(db, user_id, plan_date)
+        unfinished_tasks = self._get_unfinished_tasks(
+            db,
+            user_id,
+            plan_date,
+            allowed_goal_ids,
         )
 
-        allowed_goal_ids = {goal.id for goal in weekly_goals}
+        generation_arguments = {
+            "weekly_goals": [
+                self._weekly_goal_to_prompt(goal) for goal in weekly_goals
+            ],
+            "unfinished_tasks": [
+                self._task_to_prompt(task) for task in unfinished_tasks
+            ],
+            "available_minutes": adjusted_minutes,
+        }
+        if user_instruction and user_instruction.strip():
+            generation_arguments["user_instruction"] = user_instruction.strip()
+        generated_items = await llm_service.generate_daily_plan(**generation_arguments)
+
         created_tasks = self._create_tasks_from_plan(
             db=db,
             user_id=user_id,
             plan_date=plan_date,
             generated_items=generated_items,
             allowed_goal_ids=allowed_goal_ids,
+            default_goal_id=weekly_goals[0].id,
             available_minutes=adjusted_minutes,
         )
 
@@ -109,6 +126,7 @@ class PlanningService:
         db: Session,
         user_id: int,
         plan_date: date,
+        allowed_goal_ids: set[int],
     ) -> list[DailyTask]:
         return list(
             db.scalars(
@@ -117,10 +135,31 @@ class PlanningService:
                     DailyTask.user_id == user_id,
                     DailyTask.status.in_(UNFINISHED_STATUSES),
                     DailyTask.task_date <= plan_date,
+                    DailyTask.weekly_goal_id.in_(allowed_goal_ids),
                 )
                 .order_by(DailyTask.task_date, DailyTask.priority.desc(), DailyTask.id)
             )
         )
+
+    def _remove_pending_ai_plan(
+        self,
+        db: Session,
+        user_id: int,
+        plan_date: date,
+    ) -> None:
+        stale_plan_tasks = list(
+            db.scalars(
+                select(DailyTask).where(
+                    DailyTask.user_id == user_id,
+                    DailyTask.task_date == plan_date,
+                    DailyTask.source == "ai",
+                    DailyTask.status == "pending",
+                )
+            )
+        )
+        for task in stale_plan_tasks:
+            db.delete(task)
+        db.flush()
 
     def _create_tasks_from_plan(
         self,
@@ -129,6 +168,7 @@ class PlanningService:
         plan_date: date,
         generated_items: list[dict[str, Any]],
         allowed_goal_ids: set[int],
+        default_goal_id: int,
         available_minutes: int,
     ) -> list[DailyTask]:
         created_tasks: list[DailyTask] = []
@@ -137,9 +177,19 @@ class PlanningService:
         normalized_items = [
             normalized
             for item in generated_items
-            if (normalized := self._normalize_plan_item(item, allowed_goal_ids))
+            if (
+                normalized := self._normalize_plan_item(
+                    item,
+                    allowed_goal_ids,
+                    default_goal_id,
+                )
+            )
             is not None
         ]
+        normalized_items = list({
+            item["title"].casefold(): item
+            for item in normalized_items
+        }.values())
         normalized_items.sort(key=lambda item: PRIORITY_ORDER[item["priority"]])
 
         for normalized in normalized_items:
@@ -156,6 +206,13 @@ class PlanningService:
             task = DailyTask(
                 user_id=user_id,
                 task_date=plan_date,
+                planning_scope="daily",
+                due_at=task_deadline_service.calculate(
+                    db,
+                    user_id,
+                    plan_date,
+                    "daily",
+                ),
                 source="ai",
                 status="pending",
                 **normalized,
@@ -174,6 +231,7 @@ class PlanningService:
         self,
         item: dict[str, Any],
         allowed_goal_ids: set[int],
+        default_goal_id: int,
     ) -> dict[str, Any] | None:
         title = str(item.get("title") or "").strip()
         if not title:
@@ -192,13 +250,15 @@ class PlanningService:
             priority = "medium"
 
         weekly_goal_id = item.get("weekly_goal_id")
-        if weekly_goal_id is not None:
+        if weekly_goal_id is None:
+            weekly_goal_id = default_goal_id
+        else:
             try:
                 weekly_goal_id = int(weekly_goal_id)
             except (TypeError, ValueError):
-                weekly_goal_id = None
+                weekly_goal_id = default_goal_id
             if weekly_goal_id not in allowed_goal_ids:
-                weekly_goal_id = None
+                weekly_goal_id = default_goal_id
 
         description = item.get("description")
         if description is not None:

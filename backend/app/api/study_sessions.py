@@ -33,14 +33,12 @@ def start_study_session(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> StudySession:
-    running_session_id = db.scalar(
-        select(StudySession.id).where(
+    running_session = db.scalar(
+        select(StudySession).where(
             StudySession.user_id == user.id,
             StudySession.status == "running",
         )
     )
-    if running_session_id is not None:
-        raise HTTPException(status_code=409, detail="A study session is already running")
 
     if payload.daily_task_id is not None:
         task_id = db.scalar(
@@ -52,10 +50,26 @@ def start_study_session(
         if task_id is None:
             raise HTTPException(status_code=404, detail="Daily task not found")
 
+    started_at = payload.started_at or datetime.now(timezone.utc)
+    if running_session is not None:
+        # A browser refresh, cleared local storage, or an older abandoned timer can
+        # leave a server-side session running even though the UI is idle. Reclaim
+        # that incomplete record so Start remains recoverable and no empty session
+        # is added to focus history.
+        running_session.daily_task_id = payload.daily_task_id
+        running_session.subject = payload.subject
+        running_session.started_at = started_at
+        running_session.ended_at = None
+        running_session.duration_minutes = None
+        running_session.notes = None
+        db.commit()
+        db.refresh(running_session)
+        return running_session
+
     values = payload.model_dump(exclude={"started_at"})
     session = StudySession(
         user_id=user.id,
-        started_at=payload.started_at or datetime.now(timezone.utc),
+        started_at=started_at,
         **values,
     )
     db.add(session)

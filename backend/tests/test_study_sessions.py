@@ -78,3 +78,35 @@ def test_task_completes_when_cumulative_focus_reaches_estimate(client, user_head
 
     completed_task = client.get("/daily-tasks/today", headers=user_headers).json()[0]
     assert completed_task["status"] == "completed"
+
+
+def test_start_reclaims_an_abandoned_running_session(client, user_headers):
+    abandoned_at = datetime.now(timezone.utc) - timedelta(days=2)
+    abandoned = client.post(
+        "/study-sessions/start",
+        headers=user_headers,
+        json={
+            "subject": "Abandoned session",
+            "started_at": abandoned_at.isoformat(),
+        },
+    )
+    assert abandoned.status_code == 201
+
+    restarted_at = datetime.now(timezone.utc)
+    restarted = client.post(
+        "/study-sessions/start",
+        headers=user_headers,
+        json={
+            "subject": "Current focus session",
+            "started_at": restarted_at.isoformat(),
+        },
+    )
+
+    assert restarted.status_code == 201
+    assert restarted.json()["id"] == abandoned.json()["id"]
+    assert restarted.json()["subject"] == "Current focus session"
+    assert restarted.json()["status"] == "running"
+    returned_started_at = datetime.fromisoformat(restarted.json()["started_at"])
+    if returned_started_at.tzinfo is None:
+        returned_started_at = returned_started_at.replace(tzinfo=timezone.utc)
+    assert returned_started_at >= restarted_at

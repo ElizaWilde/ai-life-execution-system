@@ -10,6 +10,7 @@ import {
   EnergyLevel,
   MoodLevel,
   Priority,
+  ReschedulingProposal,
   TodayDashboard,
 } from "../../lib/api";
 import { useAppSettings, workloadMinutes } from "../../lib/settings";
@@ -67,6 +68,7 @@ export default function TodayPage() {
   const today = localToday();
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [dashboard, setDashboard] = useState<TodayDashboard | null>(null);
+  const [proposals, setProposals] = useState<ReschedulingProposal[]>([]);
   const [generatedPlan, setGeneratedPlan] = useState<AdaptiveDailyPlan | null>(null);
   const [showAddTask, setShowAddTask] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
@@ -74,6 +76,7 @@ export default function TodayPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [planInstruction, setPlanInstruction] = useState("");
 
   const [title, setTitle] = useState("");
   const [taskHours, setTaskHours] = useState("0.5");
@@ -89,12 +92,14 @@ export default function TodayPage() {
   async function loadToday() {
     setError("");
     try {
-      const [taskData, dashboardData] = await Promise.all([
+      const [taskData, dashboardData, proposalData] = await Promise.all([
         api.getTodayTasks(),
         api.getTodayDashboard(),
+        api.getReschedulingProposals(),
       ]);
       setTasks(taskData);
       setDashboard(dashboardData);
+      setProposals(proposalData);
       if (dashboardData.check_in) {
         setEnergy(dashboardData.check_in.energy_level);
         setMood(dashboardData.check_in.mood_level);
@@ -232,20 +237,73 @@ export default function TodayPage() {
     }
   }
 
-  async function generatePlan() {
+  async function generatePlan(userInstruction?: string) {
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      const result = await api.generatePlan({ available_minutes: Number(availableMinutes), task_date: today });
+      const instruction = userInstruction?.trim();
+      const result = await api.generatePlan({
+        available_minutes: Number(availableMinutes),
+        task_date: today,
+        ...(instruction ? { user_instruction: instruction } : {}),
+      });
       setGeneratedPlan(result);
-      setMessage(`Generated ${result.tasks.length} tasks for ${result.adjusted_available_minutes} minutes of planning capacity.`);
+      if (instruction) setPlanInstruction("");
+      setMessage(`${instruction ? "Adjusted" : "Generated"} ${result.tasks.length} tasks for ${result.adjusted_available_minutes} minutes of planning capacity.`);
       await loadToday();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to generate plan");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function generateRolloverProposal() {
+    setBusy(true);
+    setError("");
+    try {
+      const proposal = await api.generateReschedulingProposal();
+      setMessage(
+        proposal
+          ? `Rollover proposal #${proposal.id} is ready for review.`
+          : "No overdue tasks need a rollover proposal.",
+      );
+      await loadToday();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to generate rollover proposal");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateProposal(
+    proposal: ReschedulingProposal,
+    action: "approve" | "reject" | "apply",
+  ) {
+    setBusy(true);
+    setError("");
+    try {
+      if (action === "approve") await api.approveReschedulingProposal(proposal.id);
+      else if (action === "reject") await api.rejectReschedulingProposal(proposal.id);
+      else await api.applyReschedulingProposal(proposal.id);
+      setMessage(
+        action === "apply"
+          ? `Proposal #${proposal.id} was applied.`
+          : `Proposal #${proposal.id} was ${action === "approve" ? "approved" : "rejected"}.`,
+      );
+      await loadToday();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update proposal");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function adjustPlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!planInstruction.trim()) return;
+    void generatePlan(planInstruction);
   }
 
   const date = new Date(`${today}T00:00:00`);
@@ -278,9 +336,9 @@ export default function TodayPage() {
             <div className="today-work-list">
               {loading ? <p className="today-empty">Loading today’s plan…</p> : null}
               {!loading && !sortedTasks.length ? <p className="today-empty">No tasks yet. Add the first task for today.</p> : null}
-              {sortedTasks.map((task) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""}`} key={task.id}>
+              {sortedTasks.map((task) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""} ${task.is_overdue ? "overdue" : ""}`} key={task.id}>
                 <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className={`plan-completion-toggle ${task.status === "completed" ? "completed" : ""}`} disabled={busy} onClick={() => setStatus(task, task.status === "completed" ? "pending" : "completed")} title={task.status === "completed" ? "Reopen task" : "Mark complete"} type="button">{task.status === "completed" ? <TodayIcon name="check" size={12} /> : null}</button>
-                <span className="priority-title">{task.title}</span>
+                <span className="priority-title">{task.title}{task.is_overdue ? <em className="task-overdue-badge">Overdue</em> : null}</span>
                 <b className={`today-priority ${task.priority}`}>{task.priority}</b>
                 <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
                 <div className="priority-row-actions">
@@ -293,10 +351,38 @@ export default function TodayPage() {
             </div>
           </section>
 
+          <section className="today-card rollover-proposals-card">
+            <div className="rollover-proposals-heading">
+              <div className="rollover-proposals-title">
+                <span className="rollover-proposals-icon"><TodayIcon name="calendar" size={18} /></span>
+                <div><h2>Rollover proposals</h2><p>Review suggested dates before unfinished tasks are moved.</p></div>
+              </div>
+              <button className="rollover-check-button" disabled={busy} onClick={generateRolloverProposal} type="button"><TodayIcon name="spark" size={14} />Check unfinished work</button>
+            </div>
+            {proposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved").length === 0 ? (
+              <div className="rollover-empty-state">
+                <span><TodayIcon name="check" size={15} /></span>
+                <div><strong>Your schedule is up to date</strong><p>No rollover proposals need confirmation.</p></div>
+              </div>
+            ) : null}
+            {proposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved").map((proposal) => (
+              <article className="rollover-proposal" key={proposal.id}>
+                <div><strong>Proposal #{proposal.id}</strong><span className={`proposal-status ${proposal.status}`}>{proposal.status}</span></div>
+                <p>{proposal.reason}</p>
+                <ul>{proposal.items.map((item) => <li key={item.id}><span>Task #{item.daily_task_id}</span><b>{item.original_date} → {item.proposed_date}</b><small>{formatMinutes(item.estimated_minutes)}</small></li>)}</ul>
+                <div className="proposal-actions">
+                  {proposal.status === "pending" ? <button disabled={busy} onClick={() => updateProposal(proposal, "approve")} type="button">Approve</button> : null}
+                  {proposal.status === "approved" ? <button disabled={busy} onClick={() => updateProposal(proposal, "apply")} type="button">Apply changes</button> : null}
+                  <button className="secondary" disabled={busy} onClick={() => updateProposal(proposal, "reject")} type="button">Reject</button>
+                </div>
+              </article>
+            ))}
+          </section>
+
           <section className="today-card ai-plan-card ai-plan-main-card">
             <div className="side-card-heading"><h2>Today’s AI Plan</h2><span>Based on weekly goals + today’s condition</span></div><p>Generate or refine today’s plan.</p>
             {generatedPlan ? <div className="adaptive-inline"><strong>{Math.round(generatedPlan.readiness_score)} readiness</strong><span>{generatedPlan.adjusted_available_minutes} min capacity · {generatedPlan.workload_level} workload</span></div> : null}
-            <div className="ai-plan-actions"><article><h3><b>1</b> Generate Plan</h3><p>Create today’s plan from weekly goals, energy, mood and available time.</p><button disabled={busy} onClick={generatePlan} type="button"><TodayIcon name="spark" /> Generate Plan</button></article><article><h3><b>2</b> Adjust Plan</h3><p>Revise the plan from your check-in and current progress.</p><button disabled={busy} onClick={generatePlan} type="button"><TodayIcon name="edit" /> Adjust Plan</button></article></div>
+            <div className="ai-plan-actions"><article><h3><b>1</b> Generate Plan</h3><p>Create today’s plan from weekly goals, energy, mood and available time.</p><button disabled={busy} onClick={() => generatePlan()} type="button"><TodayIcon name="spark" /> Generate Plan</button></article><article className="ai-adjust-card"><h3><b>2</b> Adjust Plan</h3><form className="ai-adjust-form" onSubmit={adjustPlan}><input aria-label="Tell AI how to adjust today's plan" disabled={busy} maxLength={1000} onChange={(event) => setPlanInstruction(event.target.value)} placeholder="e.g. Make it lighter and prioritize API work" value={planInstruction} /><button aria-label="Adjust plan with AI" disabled={busy || !planInstruction.trim()} title="Adjust plan with AI" type="submit"><TodayIcon name="spark" size={15} /></button></form></article></div>
           </section>
         </main>
 

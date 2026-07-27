@@ -42,6 +42,7 @@ from app.schemas.coaching import WorkloadLevel
 Priority = Literal["low", "medium", "high"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 TaskSource = Literal["manual", "ai", "notion"]
+PlanningScope = Literal["daily", "weekly"]
 
 
 class DailyTaskBase(BaseModel):
@@ -49,6 +50,8 @@ class DailyTaskBase(BaseModel):
     # = None means this gives it a default value
     description: str | None = None
     task_date: date
+    planning_scope: PlanningScope = "daily"
+    due_at: datetime | None = None
     # ge=0 and gt=0 are validation constraints(验证约束) in Pydantic Field.
     # ge means greater than or equal to. gt means greater than.
     estimated_minutes: int | None = Field(default=None, ge=0)
@@ -63,6 +66,7 @@ class DailyTaskCreate(DailyTaskBase):
 class DailyPlanGenerateRequest(BaseModel):
     available_minutes: int = Field(gt=0, le=1_440)
     task_date: date | None = None
+    user_instruction: str | None = Field(default=None, max_length=1_000)
 
 
 class DailyTaskUpdate(BaseModel):
@@ -81,6 +85,7 @@ class DailyTaskRead(DailyTaskBase):
     user_id: int
     status: TaskStatus
     source: TaskSource
+    is_overdue: bool
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime

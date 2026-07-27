@@ -97,6 +97,8 @@ export type WeeklyGoal = {
   description: string | null;
   week_start: string;
   week_end: string;
+  due_at: string;
+  is_overdue: boolean;
   priority: Priority;
   status: "active" | "completed" | "cancelled";
   target_minutes: number | null;
@@ -143,6 +145,9 @@ export type DailyTask = {
   title: string;
   description: string | null;
   task_date: string;
+  planning_scope: "daily" | "weekly";
+  due_at: string;
+  is_overdue: boolean;
   estimated_minutes: number | null;
   priority: Priority;
   weekly_goal_id: number | null;
@@ -151,6 +156,32 @@ export type DailyTask = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ReschedulingProposalItem = {
+  id: number;
+  daily_task_id: number;
+  original_date: string;
+  proposed_date: string;
+  estimated_minutes: number;
+  reason: string;
+  created_at: string;
+};
+
+export type ReschedulingProposal = {
+  id: number;
+  user_id: number;
+  proposal_type: "rollover" | "reschedule";
+  status: "pending" | "approved" | "rejected" | "applied" | "expired";
+  reason: string;
+  expected_minutes: number;
+  expires_at: string;
+  approved_at: string | null;
+  rejected_at: string | null;
+  applied_at: string | null;
+  created_at: string;
+  updated_at: string;
+  items: ReschedulingProposalItem[];
 };
 
 export type StudySession = {
@@ -351,6 +382,7 @@ export const api = {
     description?: string | null;
     week_start: string;
     week_end: string;
+    due_at?: string | null;
     priority: Priority;
     target_minutes?: number | null;
   }) => request<WeeklyGoal>("/weekly-goals", { method: "POST", body }),
@@ -390,6 +422,8 @@ export const api = {
     title: string;
     description?: string | null;
     task_date: string;
+    planning_scope?: "daily" | "weekly";
+    due_at?: string | null;
     estimated_minutes?: number | null;
     priority?: Priority;
     weekly_goal_id?: number | null;
@@ -400,6 +434,30 @@ export const api = {
   deleteTask: (id: number) =>
     request<void>(`/daily-tasks/${id}`, { method: "DELETE" }),
 
+  generateReschedulingProposal: (horizonDays = 14) =>
+    request<ReschedulingProposal | null>("/automation/rescheduling-proposals", {
+      method: "POST",
+      body: { horizon_days: horizonDays },
+    }),
+  getReschedulingProposals: (status?: ReschedulingProposal["status"]) =>
+    request<ReschedulingProposal[]>(
+      status
+        ? `/automation/proposals?status=${encodeURIComponent(status)}`
+        : "/automation/proposals",
+    ),
+  approveReschedulingProposal: (id: number) =>
+    request<ReschedulingProposal>(`/automation/proposals/${id}/approve`, {
+      method: "POST",
+    }),
+  rejectReschedulingProposal: (id: number) =>
+    request<ReschedulingProposal>(`/automation/proposals/${id}/reject`, {
+      method: "POST",
+    }),
+  applyReschedulingProposal: (id: number) =>
+    request<ReschedulingProposal>(`/automation/proposals/${id}/apply`, {
+      method: "POST",
+    }),
+
   getParkedThoughts: () => request<ParkedThought[]>("/parked-thoughts"),
   createParkedThought: (content: string) =>
     request<ParkedThought>("/parked-thoughts", { method: "POST", body: { content } }),
@@ -407,7 +465,7 @@ export const api = {
     request<ParkedThought>(`/parked-thoughts/${id}`, { method: "PATCH", body }),
   deleteParkedThought: (id: number) =>
     request<void>(`/parked-thoughts/${id}`, { method: "DELETE" }),
-  generatePlan: (body: { available_minutes: number; task_date?: string }) =>
+  generatePlan: (body: { available_minutes: number; task_date?: string; user_instruction?: string }) =>
     request<AdaptiveDailyPlan>(
       "/daily-tasks/generate",
       { method: "POST", body },

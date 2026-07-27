@@ -102,6 +102,7 @@ class LLMService:
         weekly_goals: list[dict],
         unfinished_tasks: list[dict],
         available_minutes: int,
+        user_instruction: str | None = None,
     ) -> list[dict]:
         system_prompt = """
 You are a planning assistant.
@@ -111,8 +112,11 @@ Generate a realistic daily execution plan from weekly goals.
 Rules:
 - Do not overload the user.
 - Prefer urgent unfinished tasks.
+- Use only the listed active weekly goals and their linked unfinished tasks.
+- Never recreate completed, deleted, cancelled, or unrelated work.
 - Split large goals into small tasks.
-- Each task must have a title, estimated_minutes, and priority.
+- Each task must have a title, estimated_minutes, priority, and weekly_goal_id
+  matching one of the listed weekly goals.
 - Output JSON only.
 """
 
@@ -125,6 +129,9 @@ Unfinished tasks:
 
 Available minutes today:
 {available_minutes}
+
+User adjustment request:
+{user_instruction or "No additional adjustment requested."}
 
 Return JSON array only.
 """

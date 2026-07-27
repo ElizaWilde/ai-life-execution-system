@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, String, Text, event, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -14,6 +14,10 @@ class DailyTask(Base):
         CheckConstraint(
             "estimated_minutes IS NULL OR estimated_minutes >= 0",
             name="ck_daily_tasks_estimated_minutes",
+        ),
+        CheckConstraint(
+            "planning_scope IN ('daily', 'weekly')",
+            name="ck_daily_tasks_planning_scope",
         ),
     )
 
@@ -27,6 +31,8 @@ class DailyTask(Base):
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     task_date: Mapped[date] = mapped_column(Date, index=True)
+    planning_scope: Mapped[str] = mapped_column(String(20), default="daily", index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     estimated_minutes: Mapped[int | None]
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
@@ -45,3 +51,26 @@ class DailyTask(Base):
     study_sessions: Mapped[list["StudySession"]] = relationship(
         back_populates="daily_task"
     )
+    proposal_items: Mapped[list["ReschedulingProposalItem"]] = relationship(
+        back_populates="daily_task"
+    )
+
+    @property
+    def is_overdue(self) -> bool:
+        if self.status in {"completed", "cancelled"} or self.due_at is None:
+            return False
+        due_at = self.due_at
+        if due_at.tzinfo is None or due_at.utcoffset() is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        return due_at <= datetime.now(timezone.utc)
+
+
+@event.listens_for(DailyTask, "before_insert")
+def set_default_due_at(_mapper: object, _connection: object, task: DailyTask) -> None:
+    """Backstop for internal/test inserts; API services apply the user's timezone."""
+    if task.due_at is None:
+        task.due_at = datetime.combine(
+            task.task_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone.utc,
+        )

@@ -6,6 +6,9 @@ generate a realistic daily plan.
 Rules:
 - Do not overload the user.
 - Prefer urgent unfinished tasks.
+- Use only the listed active weekly goals and their linked unfinished tasks.
+- Never recreate completed, deleted, cancelled, or unrelated work.
 - Split large goals into small tasks.
 - Each task should have an estimated duration.
+- Each task must include a weekly_goal_id matching one of the listed weekly goals.
 - Output JSON only.

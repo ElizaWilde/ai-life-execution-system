@@ -13,6 +13,7 @@ class WeeklyGoalBase(BaseModel):
     description: str | None = None
     week_start: date
     week_end: date
+    due_at: datetime | None = None
     priority: Priority = "medium"
     target_minutes: int | None = Field(default=None, ge=0)
 
@@ -41,6 +42,7 @@ class WeeklyGoalRead(WeeklyGoalBase):
     id: int
     user_id: int
     status: GoalStatus
+    is_overdue: bool
     notion_page_id: str | None
     created_at: datetime
     updated_at: datetime

@@ -12,6 +12,7 @@ from app.schemas.weekly_goal import (
     WeeklyGoalRead,
     WeeklyGoalUpdate,
 )
+from app.services.task_deadline_service import task_deadline_service
 
 
 router = APIRouter()
@@ -49,7 +50,14 @@ def create_weekly_goal(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> WeeklyGoal:
-    goal = WeeklyGoal(user_id=user.id, **payload.model_dump())
+    values = payload.model_dump()
+    values["due_at"] = task_deadline_service.calculate_weekly_goal(
+        db,
+        user.id,
+        payload.week_end,
+        explicit_due_at=payload.due_at,
+    )
+    goal = WeeklyGoal(user_id=user.id, **values)
     db.add(goal)
     db.commit()
     db.refresh(goal)

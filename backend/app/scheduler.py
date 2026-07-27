@@ -22,11 +22,12 @@ from app.services.automation_policy_service import (
 )
 from app.services.automation_preference_service import automation_preference_service
 from app.services.notification_service import NotificationService, notification_service
+from app.services.overdue_detection_service import overdue_detection_service
+from app.services.rescheduling_proposal_service import rescheduling_proposal_service
 
 
 logger = logging.getLogger("automation_scheduler")
 SCHEDULER_LOCK_ID = 1_901_202_603
-INCOMPLETE_STATUSES = ("pending", "in_progress")
 
 
 class AutomationScheduler:
@@ -263,9 +264,15 @@ class AutomationScheduler:
         created = 0
         for user, preference in self._users_with_preferences(db):
             local_now = self._local_now(now, preference.timezone)
-            overdue = self._overdue_tasks(db, user.id, local_now.date())
-            if not overdue or self._is_quiet(local_now.time(), preference):
+            findings = overdue_detection_service.find(
+                db,
+                user.id,
+                now,
+                local_date=local_now.date(),
+            )
+            if not findings or self._is_quiet(local_now.time(), preference):
                 continue
+            overdue = [finding.task for finding in findings]
             titles = ", ".join(task.title for task in overdue[:5])
             if len(overdue) > 5:
                 titles += f", and {len(overdue) - 5} more"
@@ -287,10 +294,16 @@ class AutomationScheduler:
         created = 0
         for user, preference in self._users_with_preferences(db):
             local_now = self._local_now(now, preference.timezone)
-            overdue = self._overdue_tasks(db, user.id, local_now.date())
-            if len(overdue) < 2 or self._is_quiet(local_now.time(), preference):
+            findings = overdue_detection_service.find(
+                db,
+                user.id,
+                now,
+                local_date=local_now.date(),
+            )
+            if len(findings) < 2 or self._is_quiet(local_now.time(), preference):
                 continue
-            oldest_days = max((local_now.date() - task.task_date).days for task in overdue)
+            oldest_minutes = max(item.overdue_minutes for item in findings)
+            oldest_days = oldest_minutes // (24 * 60)
             created += self._send_once(
                 db,
                 user,
@@ -299,7 +312,7 @@ class AutomationScheduler:
                 notification_type="procrastination_alert",
                 subject="A procrastination pattern may be forming",
                 message=(
-                    f"{len(overdue)} tasks are overdue; the oldest is {oldest_days} "
+                    f"{len(findings)} tasks are overdue; the oldest is {oldest_days} "
                     "day(s) late. Consider choosing one small next action."
                 ),
                 key=f"procrastination:{user.id}:{local_now.date().isoformat()}",
@@ -356,10 +369,22 @@ class AutomationScheduler:
             if not preference.automatic_rescheduling_enabled:
                 continue
             local_now = self._local_now(now, preference.timezone)
-            overdue = self._overdue_tasks(db, user.id, local_now.date())
-            if not overdue or self._is_quiet(local_now.time(), preference):
+            findings = overdue_detection_service.find(
+                db,
+                user.id,
+                now,
+                local_date=local_now.date(),
+            )
+            if not findings or self._is_quiet(local_now.time(), preference):
                 continue
-            total_minutes = sum(task.estimated_minutes or 0 for task in overdue)
+            proposal = rescheduling_proposal_service.create_from_findings(
+                db,
+                user.id,
+                local_now,
+                findings,
+            )
+            if proposal is None:
+                continue
             created += self._send_once(
                 db,
                 user,
@@ -368,9 +393,10 @@ class AutomationScheduler:
                 notification_type="rescheduling_proposal",
                 subject="Schedule change proposal",
                 message=(
-                    f"Proposal: review {len(overdue)} overdue task(s)"
-                    + (f" ({total_minutes} estimated minutes)" if total_minutes else "")
-                    + " and choose new dates. No task was moved; confirmation is required."
+                    f"Proposal #{proposal.id}: review {len(proposal.items)} overdue "
+                    f"task(s) ({proposal.expected_minutes} estimated minutes). "
+                    "Capacity-aware dates are ready. No task was moved; confirmation "
+                    "is required before the proposal can be applied."
                 ),
                 key=f"reschedule-proposal:{user.id}:{local_now.date().isoformat()}",
                 counts_toward_reminder_limit=False,
@@ -464,20 +490,6 @@ class AutomationScheduler:
             )
         )
 
-    @staticmethod
-    def _overdue_tasks(db: Session, user_id: int, today: date) -> list[DailyTask]:
-        return list(
-            db.scalars(
-                select(DailyTask)
-                .where(
-                    DailyTask.user_id == user_id,
-                    DailyTask.task_date < today,
-                    DailyTask.status.in_(INCOMPLETE_STATUSES),
-                )
-                .order_by(DailyTask.task_date, DailyTask.id)
-            )
-        )
-
     def _time_is_due(self, local_now: datetime, configured: time) -> bool:
         scheduled = datetime.combine(local_now.date(), configured, local_now.tzinfo)
         return scheduled <= local_now < scheduled + self.notification_grace
@@ -540,6 +552,10 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Provider request URLs may contain credentials (for example Telegram bot
+    # tokens), so keep third-party HTTP request logging out of scheduler output.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     scheduler = AutomationScheduler()
     signal.signal(signal.SIGTERM, scheduler.stop)
     signal.signal(signal.SIGINT, scheduler.stop)

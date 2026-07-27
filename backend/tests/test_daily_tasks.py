@@ -110,11 +110,211 @@ def test_generate_ai_daily_plan(client, user_headers, monkeypatch):
     ]
     assert body["tasks"][0]["source"] == "ai"
     assert body["tasks"][0]["weekly_goal_id"] == goal["id"]
-    assert body["tasks"][1]["weekly_goal_id"] is None
+    assert body["tasks"][1]["weekly_goal_id"] == goal["id"]
 
     today_tasks = client.get("/daily-tasks/today", headers=user_headers)
     assert today_tasks.status_code == 200
     assert [task["source"] for task in today_tasks.json()] == ["ai", "ai"]
+
+
+def test_generate_ai_plan_ignores_tasks_outside_active_weekly_plan(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.api.daily_tasks.settings.ollama_api_key", "test-key")
+    today = date.today()
+
+    removed_goal = client.post(
+        "/weekly-goals",
+        headers=user_headers,
+        json={
+            "title": "Removed weekly priority",
+            "week_start": today.isoformat(),
+            "week_end": today.isoformat(),
+            "priority": "high",
+            "target_minutes": 60,
+        },
+    ).json()
+    client.patch(
+        f"/weekly-goals/{removed_goal['id']}",
+        headers=user_headers,
+        json={"status": "cancelled"},
+    )
+    active_goal = client.post(
+        "/weekly-goals",
+        headers=user_headers,
+        json={
+            "title": "Current weekly priority",
+            "week_start": today.isoformat(),
+            "week_end": today.isoformat(),
+            "priority": "high",
+            "target_minutes": 60,
+        },
+    ).json()
+
+    def create_task(title, weekly_goal_id=None, status=None):
+        task = client.post(
+            "/daily-tasks",
+            headers=user_headers,
+            json={
+                "title": title,
+                "task_date": today.isoformat(),
+                "estimated_minutes": 30,
+                "priority": "high",
+                "weekly_goal_id": weekly_goal_id,
+            },
+        ).json()
+        if status:
+            client.patch(
+                f"/daily-tasks/{task['id']}",
+                headers=user_headers,
+                json={"status": status},
+            )
+        return task
+
+    create_task("Task from removed plan", removed_goal["id"])
+    create_task("Current unfinished task", active_goal["id"])
+    create_task("Already completed task", active_goal["id"], "completed")
+    create_task("Unattached task")
+
+    async def fake_generate_daily_plan(
+        weekly_goals,
+        unfinished_tasks,
+        available_minutes,
+    ):
+        assert [goal["id"] for goal in weekly_goals] == [active_goal["id"]]
+        assert [task["title"] for task in unfinished_tasks] == [
+            "Current unfinished task"
+        ]
+        return [
+            {
+                "title": "Work on current priority",
+                "estimated_minutes": 30,
+                "priority": "high",
+            },
+            {
+                "title": "Work on current priority",
+                "estimated_minutes": 30,
+                "priority": "high",
+            },
+        ]
+
+    monkeypatch.setattr(
+        "app.services.planning_service.llm_service.generate_daily_plan",
+        fake_generate_daily_plan,
+    )
+
+    response = client.post(
+        "/daily-tasks/generate",
+        headers=user_headers,
+        json={"available_minutes": 60, "task_date": today.isoformat()},
+    )
+
+    assert response.status_code == 201
+    assert [task["title"] for task in response.json()["tasks"]] == [
+        "Work on current priority"
+    ]
+    assert response.json()["tasks"][0]["weekly_goal_id"] == active_goal["id"]
+
+
+def test_regenerating_today_replaces_pending_ai_plan(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.api.daily_tasks.settings.ollama_api_key", "test-key")
+    today = date.today()
+    goal = client.post(
+        "/weekly-goals",
+        headers=user_headers,
+        json={
+            "title": "Current weekly priority",
+            "week_start": today.isoformat(),
+            "week_end": today.isoformat(),
+            "priority": "high",
+            "target_minutes": 60,
+        },
+    ).json()
+    generated_titles = iter(["First generated plan", "Replacement plan"])
+
+    async def fake_generate_daily_plan(*args, **kwargs):
+        return [{
+            "title": next(generated_titles),
+            "estimated_minutes": 30,
+            "priority": "high",
+            "weekly_goal_id": goal["id"],
+        }]
+
+    monkeypatch.setattr(
+        "app.services.planning_service.llm_service.generate_daily_plan",
+        fake_generate_daily_plan,
+    )
+
+    for _ in range(2):
+        response = client.post(
+            "/daily-tasks/generate",
+            headers=user_headers,
+            json={"available_minutes": 60, "task_date": today.isoformat()},
+        )
+        assert response.status_code == 201
+
+    today_tasks = client.get("/daily-tasks/today", headers=user_headers).json()
+    assert [task["title"] for task in today_tasks] == ["Replacement plan"]
+
+
+def test_ai_plan_passes_user_adjustment_instruction(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.api.daily_tasks.settings.ollama_api_key", "test-key")
+    today = date.today()
+    goal = client.post(
+        "/weekly-goals",
+        headers=user_headers,
+        json={
+            "title": "Finish API work",
+            "week_start": today.isoformat(),
+            "week_end": today.isoformat(),
+            "priority": "high",
+            "target_minutes": 60,
+        },
+    ).json()
+
+    async def fake_generate_daily_plan(
+        weekly_goals,
+        unfinished_tasks,
+        available_minutes,
+        user_instruction,
+    ):
+        assert user_instruction == "Make the plan lighter and prioritize API work."
+        return [{
+            "title": "Light API review",
+            "estimated_minutes": 20,
+            "priority": "high",
+            "weekly_goal_id": goal["id"],
+        }]
+
+    monkeypatch.setattr(
+        "app.services.planning_service.llm_service.generate_daily_plan",
+        fake_generate_daily_plan,
+    )
+
+    response = client.post(
+        "/daily-tasks/generate",
+        headers=user_headers,
+        json={
+            "available_minutes": 60,
+            "task_date": today.isoformat(),
+            "user_instruction": "  Make the plan lighter and prioritize API work.  ",
+        },
+    )
+
+    assert response.status_code == 201
+    assert [task["title"] for task in response.json()["tasks"]] == [
+        "Light API review"
+    ]
 
 
 def test_generate_ai_daily_plan_requires_active_weekly_goal(

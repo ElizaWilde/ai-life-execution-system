@@ -10,7 +10,6 @@ import {
   WeekDashboard,
   WeeklyReview,
 } from "../../lib/api";
-import { orderByWeekStart, useAppSettings } from "../../lib/settings";
 
 type ReviewIconName = "spark" | "check" | "clock" | "mood" | "alert" | "pattern" | "energy" | "calendar" | "refresh";
 
@@ -38,6 +37,12 @@ function dateAt(value: string) {
   return new Date(`${value}T00:00:00`);
 }
 
+function addDays(value: string, days: number) {
+  const date = dateAt(value);
+  date.setDate(date.getDate() + days);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
 function formatMinutes(minutes: number) {
   if (!minutes) return "0h";
   const hours = minutes / 60;
@@ -50,7 +55,6 @@ function titleCase(value?: string | null) {
 }
 
 export default function ReviewPage() {
-  const appSettings = useAppSettings();
   const [reviewDate, setReviewDate] = useState(localToday());
   const [activeTab, setActiveTab] = useState<"daily" | "weekly">("daily");
   const [review, setReview] = useState<DailyReview | null>(null);
@@ -58,6 +62,7 @@ export default function ReviewPage() {
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [today, setToday] = useState<TodayDashboard | null>(null);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
+  const [weeklyFocusHistory, setWeeklyFocusHistory] = useState<WeekDashboard[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -74,6 +79,10 @@ export default function ReviewPage() {
       setTasks(taskData);
       setToday(todayData);
       setWeek(weekData);
+      const previousWeeks = await Promise.all(
+        Array.from({ length: 6 }, (_, index) => api.getWeekDashboard(addDays(weekData.week_start, -(index + 1) * 7))),
+      );
+      setWeeklyFocusHistory([...previousWeeks.reverse(), weekData]);
       try { setReview(await api.getReview(reviewDate)); } catch { setReview(null); }
       try { setWeeklyReview(await api.getWeeklyReview(weekData.week_start)); } catch { setWeeklyReview(null); }
     } catch (reason) {
@@ -96,8 +105,10 @@ export default function ReviewPage() {
     const points = week?.daily_focus ?? [];
     return points.reduce<(typeof points)[number] | null>((best, point) => !best || point.focus_minutes > best.focus_minutes ? point : best, null);
   }, [week]);
-  const chartMaximumMinutes = 15 * 60;
-  const displayedFocus = orderByWeekStart(week?.daily_focus ?? [], (point) => point.date, appSettings.weekStart);
+  const largestWeeklyFocusMinutes = Math.max(0, ...weeklyFocusHistory.map((item) => item.focus_minutes));
+  const chartMaximumHours = Math.max(15, Math.ceil(largestWeeklyFocusMinutes / 60 / 15) * 15);
+  const chartMaximumMinutes = chartMaximumHours * 60;
+  const chartAxisHours = [chartMaximumHours, chartMaximumHours * 2 / 3, chartMaximumHours / 3, 0];
   const date = dateAt(reviewDate);
   const weekLabel = week ? `${dateAt(week.week_start).toLocaleDateString("en", { month: "short", day: "numeric" })} – ${dateAt(week.week_end).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}` : "This week";
 
@@ -176,7 +187,7 @@ export default function ReviewPage() {
 
           <section className="review-card review-actions"><h2><ReviewIcon name="energy" /> Actions</h2><div><button disabled={busy} onClick={generateWeeklyReview} type="button"><ReviewIcon name="spark" /> Generate Weekly Review</button><Link href="/weekly-plan"><ReviewIcon name="calendar" /> Plan Tomorrow</Link></div></section>
 
-          <section className="review-card weekly-focus-chart"><div className="review-side-heading"><h2>This Week: Focus Hours</h2><span><i /> Focus Time (h)</span></div><div className="review-chart"><div className="review-chart-axis"><span>15h</span><span>10h</span><span>5h</span><span>0h</span></div><div className="review-chart-bars">{displayedFocus.map((point) => <div key={point.date}><div className="review-bar-area"><span style={{ height: `${Math.min(100, point.focus_minutes / chartMaximumMinutes * 100)}%` }} /></div><small>{dateAt(point.date).toLocaleDateString("en", { weekday: "short" })}</small></div>)}</div></div></section>
+          <section className="review-card weekly-focus-chart"><div className="review-side-heading"><h2>Weekly Focus Hours</h2><span><i /> Focus Time (h)</span></div><div className="review-chart"><div className="review-chart-axis">{chartAxisHours.map((hours) => <span key={hours}>{hours}h</span>)}</div><div className="review-chart-bars">{weeklyFocusHistory.map((item) => <div key={item.week_start} title={`${formatMinutes(item.focus_minutes)} focused during ${dateAt(item.week_start).toLocaleDateString("en", { month: "short", day: "numeric" })} – ${dateAt(item.week_end).toLocaleDateString("en", { month: "short", day: "numeric" })}`}><div className="review-bar-area"><span style={{ height: `${Math.min(100, item.focus_minutes / chartMaximumMinutes * 100)}%` }} /></div><small>{dateAt(item.week_start).toLocaleDateString("en", { month: "short", day: "numeric" })}</small></div>)}</div></div></section>
         </aside>
       </div>
     </section>

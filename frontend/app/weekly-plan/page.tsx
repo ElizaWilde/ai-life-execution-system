@@ -728,9 +728,9 @@ export default function WeeklyPlanPage() {
                 {loading ? <p>Loading priorities…</p> : null}
                 {!loading && priorities.length === 0 ? <p>No priorities yet. Add the first meaningful task for this week.</p> : null}
                 {priorities.map((task) => (
-                  <div className={task.status === "completed" ? "completed" : ""} key={task.id}>
+                  <div className={`${task.status === "completed" ? "completed" : ""} ${task.is_overdue ? "overdue" : ""}`} key={task.id}>
                     <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className={`plan-completion-toggle ${task.status === "completed" ? "completed" : ""}`} disabled={busy} onClick={() => toggleTaskCompleted(task)} title={task.status === "completed" ? "Reopen priority" : "Mark priority complete"} type="button">{task.status === "completed" ? <PlanIcon name="check" size={12} /> : null}</button>
-                    <span className="priority-title">{task.title}</span>
+                    <span className="priority-title">{task.title}{task.is_overdue ? <em className="task-overdue-badge">Overdue</em> : null}</span>
                     <b className={task.priority}>{task.priority}</b>
                     <small>{task.target_minutes ? `Est. ${formatHours(task.target_minutes)}` : "Flexible"}</small>
                     <div className="priority-row-actions">
