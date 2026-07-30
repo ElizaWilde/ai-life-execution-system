@@ -16,6 +16,7 @@ class AutomationAction(str, Enum):
     CHANGE_TASK_DURATION = "change_task_duration"
     REDUCE_WEEKLY_GOAL = "reduce_weekly_goal"
     UPDATE_NOTION_TASKS = "update_notion_tasks"
+    COMPLETE_TASK = "complete_task"
 
     DELETE_TASKS = "delete_tasks"
     CANCEL_GOALS = "cancel_goals"
@@ -101,6 +102,11 @@ AUTOMATION_RULES: dict[AutomationAction, AutomationRule] = {
         AutomationAction.UPDATE_NOTION_TASKS,
         AutomationLevel.REQUIRES_CONFIRMATION,
         "Update Notion tasks only after user confirmation.",
+    ),
+    AutomationAction.COMPLETE_TASK: AutomationRule(
+        AutomationAction.COMPLETE_TASK,
+        AutomationLevel.REQUIRES_CONFIRMATION,
+        "Complete a task only after the user confirms the matched task.",
     ),
     AutomationAction.DELETE_TASKS: AutomationRule(
         AutomationAction.DELETE_TASKS,

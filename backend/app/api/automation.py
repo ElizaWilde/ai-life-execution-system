@@ -2,10 +2,16 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
-from app.models import ReschedulingProposal, User
+from app.models import AutomationAudit, ReschedulingProposal, User
+from app.schemas.intelligence import (
+    AutomationAuditRead,
+    ForecastHistoryRead,
+    ProcrastinationEventRead,
+)
 from app.schemas.rescheduling_proposal import (
     ProposalStatus,
     ReschedulingProposalGenerateRequest,
@@ -16,6 +22,10 @@ from app.services.rescheduling_proposal_service import (
     ReschedulingProposalNotFoundError,
     StaleProposalError,
     rescheduling_proposal_service,
+)
+from app.services.forecast_service import forecast_service
+from app.services.procrastination_detection_service import (
+    procrastination_detection_service,
 )
 
 
@@ -114,3 +124,94 @@ def apply_rescheduling_proposal(
         StaleProposalError,
     ) as exc:
         raise _handle_error(exc) from exc
+
+
+@router.post(
+    "/proposals/{proposal_id}/confirm",
+    response_model=ReschedulingProposalRead,
+)
+def confirm_rescheduling_proposal(
+    proposal_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> ReschedulingProposal:
+    try:
+        return rescheduling_proposal_service.confirm(db, user.id, proposal_id)
+    except (
+        ReschedulingProposalNotFoundError,
+        InvalidProposalStateError,
+        StaleProposalError,
+    ) as exc:
+        raise _handle_error(exc) from exc
+
+
+@router.post(
+    "/procrastination-events/detect",
+    response_model=list[ProcrastinationEventRead],
+)
+def detect_procrastination_events(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list:
+    return procrastination_detection_service.detect(
+        db,
+        user.id,
+        datetime.now(timezone.utc),
+    )
+
+
+@router.get(
+    "/procrastination-events",
+    response_model=list[ProcrastinationEventRead],
+)
+def list_procrastination_events(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    event_status: Annotated[str | None, Query(alias="status")] = "active",
+) -> list:
+    return procrastination_detection_service.list_for_user(
+        db,
+        user.id,
+        status=event_status,
+    )
+
+
+@router.post("/forecasts/recalculate", response_model=list[ForecastHistoryRead])
+def recalculate_forecasts(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list:
+    return forecast_service.generate_for_user(
+        db,
+        user.id,
+        datetime.now(timezone.utc),
+    )
+
+
+@router.get("/forecasts", response_model=list[ForecastHistoryRead])
+def list_forecasts(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    latest_only: bool = True,
+) -> list:
+    return forecast_service.list_for_user(
+        db,
+        user.id,
+        latest_only=latest_only,
+    )
+
+
+@router.get("/audits", response_model=list[AutomationAuditRead])
+def list_automation_audits(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[AutomationAudit]:
+    return list(
+        db.scalars(
+            select(AutomationAudit)
+            .where(AutomationAudit.user_id == user.id)
+            .order_by(AutomationAudit.created_at.desc(), AutomationAudit.id.desc())
+            .limit(limit)
+        )
+    )

@@ -1,7 +1,14 @@
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.dependencies import get_current_user, get_db
+from app.models import AutomationCommand, User
+from app.schemas.command import CommandRead, CommandRequest
 from app.schemas.coordinator import CoordinatorChatRequest, CoordinatorChatResponse
 from app.services.coordinator_service import coordinator_service
 
@@ -38,3 +45,64 @@ async def chat(request: CoordinatorChatRequest) -> CoordinatorChatResponse:
         ) from exc
 
     return CoordinatorChatResponse(reply=reply, model=settings.ollama_model)
+
+
+@router.post("/commands", response_model=CommandRead)
+def execute_command(
+    payload: CommandRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> AutomationCommand:
+    try:
+        return coordinator_service.process_command(
+            db,
+            user,
+            payload.message,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/commands", response_model=list[CommandRead])
+def list_commands(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[AutomationCommand]:
+    return list(
+        db.scalars(
+            select(AutomationCommand)
+            .where(AutomationCommand.user_id == user.id)
+            .order_by(AutomationCommand.created_at.desc(), AutomationCommand.id.desc())
+            .limit(50)
+        )
+    )
+
+
+@router.post("/commands/{command_id}/confirm", response_model=CommandRead)
+def confirm_command(
+    command_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> AutomationCommand:
+    try:
+        return coordinator_service.confirm(db, user, command_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/commands/{command_id}/reject", response_model=CommandRead)
+def reject_command(
+    command_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> AutomationCommand:
+    try:
+        return coordinator_service.reject(db, user.id, command_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

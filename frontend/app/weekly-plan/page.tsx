@@ -11,6 +11,7 @@ import {
   Priority,
   WeekDashboard,
   WeeklyGoal,
+  WeeklyPlanPreview,
 } from "../../lib/api";
 
 type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target" | "flag" | "clock" | "people" | "edit" | "more" | "grip";
@@ -55,6 +56,12 @@ function addDays(value: string, days: number) {
 function formatHours(minutes: number) {
   const hours = minutes / 60;
   return `${hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)}h`;
+}
+
+function weekStartOf(value: string) {
+  const date = dateAt(value);
+  const offset = (date.getDay() + 6) % 7;
+  return addDays(value, -offset);
 }
 
 function weeklyPriorityWeight(goal: WeeklyGoal) {
@@ -137,6 +144,8 @@ export default function WeeklyPlanPage() {
   const [weekAnchor, setWeekAnchor] = useState(localToday());
   const [goals, setGoals] = useState<WeeklyGoal[]>([]);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
+  const [weeklyPreview, setWeeklyPreview] = useState<WeeklyPlanPreview | null>(null);
+  const [intendedHours, setIntendedHours] = useState("20");
   const [activeTab, setActiveTab] = useState<"weekly" | "phase">("weekly");
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
@@ -167,12 +176,19 @@ export default function WeeklyPlanPage() {
     setLoading(true);
     setError("");
     try {
-      const [goalData, weekData] = await Promise.all([
+      const selectedWeekStart = weekStartOf(anchor);
+      const [goalData, weekData, previewData] = await Promise.all([
         api.getGoalsForWeek(anchor),
         api.getWeekDashboard(anchor),
+        api.getLatestWeeklyPlanPreview(selectedWeekStart),
       ]);
       setGoals(goalData);
       setWeek(weekData);
+      setWeeklyPreview(previewData);
+      if (previewData) setIntendedHours(String(previewData.intended_minutes / 60));
+      else if (goalData.some((goal) => goal.target_minutes)) {
+        setIntendedHours(String(goalData.reduce((sum, goal) => sum + (goal.target_minutes ?? 0), 0) / 60));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to load weekly plan");
     } finally {
@@ -517,6 +533,39 @@ export default function WeeklyPlanPage() {
     }
   }
 
+  async function generateWeeklyPreview() {
+    if (!week) return;
+    setBusy(true);
+    setError("");
+    try {
+      const preview = await api.createWeeklyPlanPreview({
+        week_start: week.week_start,
+        intended_minutes: Math.round(Number(intendedHours) * 60),
+      });
+      setWeeklyPreview(preview);
+      setMessage(`Adaptive weekly preview created for ${formatHours(preview.recommended_minutes)}. Confirm it to update priority estimates.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to generate adaptive weekly plan");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmWeeklyPreview() {
+    if (!weeklyPreview) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.confirmWeeklyPlanPreview(weeklyPreview.id);
+      setMessage("Adaptive weekly plan confirmed and priority estimates updated.");
+      await loadPlan(weekAnchor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to confirm weekly plan");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="plans-page weekly-reference-page">
       <header className="plans-header">
@@ -717,6 +766,25 @@ export default function WeeklyPlanPage() {
                 <span><strong>Overall Progress</strong><small>{completedPriorities} of {goals.length} completed · weighted by priority and hours</small></span>
               </div>
             </div>
+          </section>
+
+          <section className="plan-card adaptive-week-card">
+            <div className="adaptive-week-heading">
+              <div><h2><PlanIcon name="spark" /> Adaptive Weekly Planning</h2><p>Balance your intended time against recent focus sessions and completion patterns.</p></div>
+              <label><span>Time you intend to dedicate</span><i><input min="0.5" onChange={(event) => setIntendedHours(event.target.value)} step="0.5" type="number" value={intendedHours} /> hours</i></label>
+              <button disabled={busy || Number(intendedHours) <= 0} onClick={generateWeeklyPreview} type="button">{weeklyPreview ? "Recalculate" : "Build preview"}</button>
+            </div>
+            {weeklyPreview ? <div className="adaptive-week-preview">
+              <div className="adaptive-week-summary">
+                <span><small>Recommended plan</small><strong>{formatHours(weeklyPreview.recommended_minutes)}</strong></span>
+                <span><small>Recent weekly focus</small><strong>{formatHours(weeklyPreview.historical_weekly_focus_minutes)}</strong></span>
+                <span><small>Completion pattern</small><strong>{Math.round(weeklyPreview.historical_completion_rate * 100)}%</strong></span>
+                <span><small>Estimate calibration</small><strong>{weeklyPreview.calibration.factor.toFixed(2)}×</strong></span>
+              </div>
+              <div className="adaptive-goal-allocations">{weeklyPreview.goal_allocations.map((allocation) => <div key={allocation.weekly_goal_id}><span>{allocation.title}</span><small>{formatHours(allocation.current_minutes)} → <b>{formatHours(allocation.recommended_minutes)}</b></small></div>)}</div>
+              <p>{weeklyPreview.rationale.join(" ")}</p>
+              {weeklyPreview.status === "pending" ? <button className="confirm-adaptive-week" disabled={busy} onClick={confirmWeeklyPreview} type="button"><PlanIcon name="check" size={14} /> Confirm weekly plan</button> : <span className="adaptive-week-confirmed"><PlanIcon name="check" size={14} /> Confirmed</span>}
+            </div> : <div className="adaptive-week-empty"><PlanIcon name="chart" size={18} /><span><strong>Start with your available time</strong><small>The preview will not modify your weekly priorities until you confirm it.</small></span></div>}
           </section>
 
           <section className="plan-card key-priorities-card">

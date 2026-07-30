@@ -1,21 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { DragEvent, FormEvent, useEffect, useState } from "react";
 import {
-  AdaptiveDailyPlan,
   api,
   DailyCheckIn,
+  DailyPlanPreview,
   DailyTask,
   EnergyLevel,
   MoodLevel,
   Priority,
-  ReschedulingProposal,
   TodayDashboard,
 } from "../../lib/api";
 import { useAppSettings, workloadMinutes } from "../../lib/settings";
 import { announceCheckInUpdate, subscribeToCheckInUpdates } from "../../lib/check-in-sync";
 import { AVAILABLE_TIME_OPTIONS, availableTimeBucket } from "../../lib/check-in-options";
+import DailyReviewModule from "../../components/daily-review-module";
 
 type TodayIconName = "spark" | "clock" | "check" | "trash" | "sleep" | "energy" | "mood" | "calendar" | "target" | "chart" | "edit";
 
@@ -39,6 +39,12 @@ function TodayIcon({ name, size = 18 }: { name: TodayIconName; size?: number }) 
 function localToday() {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+function addLocalDays(value: string, days: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const result = new Date(Date.UTC(year, month - 1, day + days));
+  return result.toISOString().slice(0, 10);
 }
 
 function formatMinutes(minutes: number) {
@@ -66,17 +72,27 @@ function sleepHourLabel(value: number) {
 export default function TodayPage() {
   const appSettings = useAppSettings();
   const today = localToday();
+  const tomorrow = addLocalDays(today, 1);
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [dashboard, setDashboard] = useState<TodayDashboard | null>(null);
-  const [proposals, setProposals] = useState<ReschedulingProposal[]>([]);
-  const [generatedPlan, setGeneratedPlan] = useState<AdaptiveDailyPlan | null>(null);
+  const [previewDate, setPreviewDate] = useState(today);
+  const [dailyPreviews, setDailyPreviews] = useState<Record<string, DailyPlanPreview | null>>({});
   const [showAddTask, setShowAddTask] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [activeTodayTab, setActiveTodayTab] = useState<"plan" | "review">("plan");
+  const [comparisonDirection, setComparisonDirection] = useState<"previous" | "next" | null>(null);
+  const [comparisonTasks, setComparisonTasks] = useState<DailyTask[]>([]);
+  const [comparisonDashboard, setComparisonDashboard] = useState<TodayDashboard | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const [editingTaskDate, setEditingTaskDate] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [planInstruction, setPlanInstruction] = useState("");
+  const [planAction, setPlanAction] = useState<"build" | "refine" | "confirm" | null>(null);
 
   const [title, setTitle] = useState("");
   const [taskHours, setTaskHours] = useState("0.5");
@@ -92,14 +108,15 @@ export default function TodayPage() {
   async function loadToday() {
     setError("");
     try {
-      const [taskData, dashboardData, proposalData] = await Promise.all([
+      const [taskData, dashboardData, todayPreview, tomorrowPreview] = await Promise.all([
         api.getTodayTasks(),
         api.getTodayDashboard(),
-        api.getReschedulingProposals(),
+        api.getLatestDailyPlanPreview(today),
+        api.getLatestDailyPlanPreview(tomorrow),
       ]);
       setTasks(taskData);
       setDashboard(dashboardData);
-      setProposals(proposalData);
+      setDailyPreviews({ [today]: todayPreview, [tomorrow]: tomorrowPreview });
       if (dashboardData.check_in) {
         setEnergy(dashboardData.check_in.energy_level);
         setMood(dashboardData.check_in.mood_level);
@@ -127,11 +144,14 @@ export default function TodayPage() {
     }
   }, [appSettings.workload, dashboard?.check_in?.available_minutes]);
 
-  const completion = Math.round((dashboard?.completion_rate ?? 0) * 100);
+  const completion = Math.round((dashboard?.weighted_progress_rate ?? 0) * 100);
   const circumference = 2 * Math.PI * 34;
   const plannedFocusMinutes = tasks
     .filter((task) => task.status !== "cancelled")
     .reduce((total, task) => total + (task.estimated_minutes ?? 0), 0);
+  const comparisonDate = comparisonDirection
+    ? addLocalDays(today, comparisonDirection === "previous" ? -1 : 1)
+    : null;
   const sortedTasks = [...tasks].sort((left, right) =>
     Number(left.status === "completed") - Number(right.status === "completed") || left.id - right.id,
   );
@@ -157,8 +177,10 @@ export default function TodayPage() {
       setTaskHours("0.5");
       setPriority("medium");
       setEditingTaskId(null);
+      setEditingTaskDate(null);
       setShowAddTask(false);
       await loadToday();
+      if (comparisonDirection) await loadAdjacentPlan(comparisonDirection);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to create task");
     } finally {
@@ -166,8 +188,60 @@ export default function TodayPage() {
     }
   }
 
+  async function loadAdjacentPlan(direction: "previous" | "next") {
+    const targetDate = addLocalDays(today, direction === "previous" ? -1 : 1);
+    setComparisonLoading(true);
+    try {
+      const [taskData, dashboardData] = await Promise.all([
+        api.getTasksForDate(targetDate),
+        api.getDayDashboard(targetDate),
+      ]);
+      setComparisonTasks(taskData);
+      setComparisonDashboard(dashboardData);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to load adjacent plan");
+      throw reason;
+    } finally {
+      setComparisonLoading(false);
+    }
+  }
+
+  async function showAdjacentPlan(direction: "previous" | "next") {
+    if (comparisonDirection === direction) {
+      setComparisonDirection(null);
+      setComparisonTasks([]);
+      setComparisonDashboard(null);
+      return;
+    }
+    setActiveTodayTab("plan");
+    setComparisonDirection(direction);
+    setError("");
+    try {
+      await loadAdjacentPlan(direction);
+    } catch {
+      setComparisonDirection(null);
+    }
+  }
+
+  async function moveTaskToDate(task: DailyTask, targetDate: string) {
+    if (!comparisonDirection) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await api.updateTask(task.id, { task_date: targetDate });
+      await Promise.all([loadToday(), loadAdjacentPlan(comparisonDirection)]);
+      setMessage(`Moved “${task.title}” to ${targetDate === today ? "today" : new Date(`${targetDate}T00:00:00`).toLocaleDateString("en", { weekday: "long", month: "short", day: "numeric" })}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to move task");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function editTask(task: DailyTask) {
     setEditingTaskId(task.id);
+    setEditingTaskDate(task.task_date);
     setTitle(task.title);
     setTaskHours(task.estimated_minutes ? String(task.estimated_minutes / 60) : "0.5");
     setPriority(task.priority);
@@ -180,6 +254,7 @@ export default function TodayPage() {
     setTaskHours("0.5");
     setPriority("medium");
     setShowAddTask(false);
+    setEditingTaskDate(null);
   }
 
   async function setStatus(task: DailyTask, status: DailyTask["status"]) {
@@ -187,6 +262,7 @@ export default function TodayPage() {
     try {
       await api.updateTask(task.id, { status });
       await loadToday();
+      if (comparisonDirection) await loadAdjacentPlan(comparisonDirection);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to update task");
     } finally {
@@ -202,6 +278,7 @@ export default function TodayPage() {
       await api.deleteTask(task.id);
       setMessage(`Deleted: ${task.title}`);
       await loadToday();
+      if (comparisonDirection) await loadAdjacentPlan(comparisonDirection);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to delete task");
     } finally {
@@ -237,73 +314,82 @@ export default function TodayPage() {
     }
   }
 
-  async function generatePlan(userInstruction?: string) {
+  async function generatePlan(targetDate = previewDate, userInstruction?: string) {
     setBusy(true);
+    setPlanAction(userInstruction?.trim() ? "refine" : "build");
     setError("");
     setMessage("");
     try {
       const instruction = userInstruction?.trim();
-      const result = await api.generatePlan({
+      const existingPreview = dailyPreviews[targetDate];
+      const result = await api.createDailyPlanPreview({
         available_minutes: Number(availableMinutes),
-        task_date: today,
+        target_date: targetDate,
         ...(instruction ? { user_instruction: instruction } : {}),
+        ...(instruction && existingPreview ? { base_preview_id: existingPreview.id } : {}),
       });
-      setGeneratedPlan(result);
+      setDailyPreviews((current) => ({ ...current, [targetDate]: result }));
+      setPreviewDate(targetDate);
       if (instruction) setPlanInstruction("");
-      setMessage(`${instruction ? "Adjusted" : "Generated"} ${result.tasks.length} tasks for ${result.adjusted_available_minutes} minutes of planning capacity.`);
-      await loadToday();
+      setMessage(`${instruction ? "Adjusted" : "Generated"} a ${targetDate === today ? "today" : "tomorrow"} preview with ${result.tasks.length} tasks. Confirm it before tasks are added.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to generate plan");
     } finally {
       setBusy(false);
+      setPlanAction(null);
     }
   }
 
-  async function generateRolloverProposal() {
-    setBusy(true);
-    setError("");
-    try {
-      const proposal = await api.generateReschedulingProposal();
-      setMessage(
-        proposal
-          ? `Rollover proposal #${proposal.id} is ready for review.`
-          : "No overdue tasks need a rollover proposal.",
-      );
-      await loadToday();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to generate rollover proposal");
-    } finally {
-      setBusy(false);
-    }
+  function startTaskDrag(event: DragEvent<HTMLButtonElement>, task: DailyTask) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(task.id));
+    setDraggedTaskId(task.id);
   }
 
-  async function updateProposal(
-    proposal: ReschedulingProposal,
-    action: "approve" | "reject" | "apply",
-  ) {
+  function allowTaskDrop(event: DragEvent<HTMLElement>, targetDate: string) {
+    const task = [...tasks, ...comparisonTasks].find((item) => item.id === draggedTaskId);
+    if (!task || task.task_date === targetDate) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverDate(targetDate);
+  }
+
+  async function dropTask(event: DragEvent<HTMLElement>, targetDate: string) {
+    event.preventDefault();
+    const taskId = Number(event.dataTransfer.getData("text/plain") || draggedTaskId);
+    const task = [...tasks, ...comparisonTasks].find((item) => item.id === taskId);
+    setDragOverDate(null);
+    setDraggedTaskId(null);
+    if (!task || task.task_date === targetDate) return;
+    await moveTaskToDate(task, targetDate);
+  }
+
+  function finishTaskDrag() {
+    setDraggedTaskId(null);
+    setDragOverDate(null);
+  }
+
+  async function confirmPlanPreview(preview: DailyPlanPreview) {
     setBusy(true);
+    setPlanAction("confirm");
     setError("");
     try {
-      if (action === "approve") await api.approveReschedulingProposal(proposal.id);
-      else if (action === "reject") await api.rejectReschedulingProposal(proposal.id);
-      else await api.applyReschedulingProposal(proposal.id);
-      setMessage(
-        action === "apply"
-          ? `Proposal #${proposal.id} was applied.`
-          : `Proposal #${proposal.id} was ${action === "approve" ? "approved" : "rejected"}.`,
-      );
+      const confirmed = await api.confirmDailyPlanPreview(preview.id);
+      setDailyPreviews((current) => ({ ...current, [preview.target_date]: confirmed }));
+      setMessage(`${preview.target_date === today ? "Today’s" : "Tomorrow’s"} plan was confirmed.`);
       await loadToday();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to update proposal");
+      setError(reason instanceof Error ? reason.message : "Failed to confirm plan preview");
     } finally {
       setBusy(false);
+      setPlanAction(null);
     }
   }
 
   function adjustPlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!planInstruction.trim()) return;
-    void generatePlan(planInstruction);
+    void generatePlan(previewDate, planInstruction);
   }
 
   const date = new Date(`${today}T00:00:00`);
@@ -319,14 +405,75 @@ export default function TodayPage() {
       {error ? <div className="error today-feedback">{error}</div> : null}
       {message ? <div className="success today-feedback">{message}</div> : null}
 
-      <div className="today-workspace-grid">
+      <nav aria-label="Today sections" className="workspace-section-tabs">
+        <button className={activeTodayTab === "plan" ? "active" : ""} onClick={() => setActiveTodayTab("plan")} type="button">Today’s Plan</button>
+        <button className={activeTodayTab === "review" ? "active" : ""} onClick={() => { setActiveTodayTab("review"); setComparisonDirection(null); }} type="button">Today’s Review</button>
+        <span className="today-date-arrows">
+          <button aria-label="Compare with previous day" className={comparisonDirection === "previous" ? "selected" : ""} disabled={comparisonLoading} onClick={() => showAdjacentPlan("previous")} title="Previous day" type="button">←</button>
+          <button aria-label="Compare with next day" className={comparisonDirection === "next" ? "selected" : ""} disabled={comparisonLoading} onClick={() => showAdjacentPlan("next")} title="Next day" type="button">→</button>
+        </span>
+      </nav>
+
+      <div className={`today-workspace-grid ${activeTodayTab === "review" ? "show-review" : "show-plan"} ${comparisonDirection ? `is-comparing compare-${comparisonDirection}` : ""}`}>
         <main className="today-main-column">
-          <section className="today-card today-plan-card">
+          {comparisonDirection ? (
+            <section
+              className={`today-card adjacent-plan-card ${dragOverDate === comparisonDate ? "drag-over" : ""}`}
+              onDragLeave={() => setDragOverDate(null)}
+              onDragOver={(event) => comparisonDate && allowTaskDrop(event, comparisonDate)}
+              onDrop={(event) => comparisonDate && dropTask(event, comparisonDate)}
+            >
+              <div className="today-plan-heading">
+                <div>
+                  <h2>{comparisonDirection === "previous" ? "Previous Day’s Plan" : "Next Day’s Plan"}</h2>
+                  <span>{new Date(`${comparisonDate}T00:00:00`).toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}</span>
+                </div>
+              </div>
+              <div className="adjacent-plan-summary">
+                <div><strong>{Math.round((comparisonDashboard?.weighted_progress_rate ?? 0) * 100)}%</strong><span>Time + priority</span></div>
+                <div><strong>{formatMinutes(comparisonDashboard?.focus_minutes ?? 0)}</strong><span>Focus time</span></div>
+                <div><strong>{comparisonDashboard?.completed_tasks ?? 0} / {comparisonDashboard?.planned_tasks ?? comparisonTasks.length}</strong><span>Completed</span></div>
+              </div>
+              <div className="today-work-list">
+                {comparisonLoading ? <p className="today-empty">Loading plan…</p> : null}
+                {!comparisonLoading && !comparisonTasks.length ? <p className="today-empty">No tasks planned for this day.</p> : null}
+                {comparisonTasks.map((task) => (
+                  <article className={`today-work-row adjacent-task-row ${task.status === "completed" ? "completed" : ""} ${draggedTaskId === task.id ? "dragging" : ""}`} key={task.id}>
+                    <button
+                      aria-label={`Drag ${task.title} to another day`}
+                      className={`plan-completion-toggle task-drag-handle ${task.status === "completed" ? "completed" : ""}`}
+                      disabled={busy}
+                      draggable
+                      onClick={() => setStatus(task, task.status === "completed" ? "pending" : "completed")}
+                      onDragEnd={finishTaskDrag}
+                      onDragStart={(event) => startTaskDrag(event, task)}
+                      title="Click to complete or drag to another day"
+                      type="button"
+                    >{task.status === "completed" ? <TodayIcon name="check" size={12} /> : null}</button>
+                    <span className="priority-title">{task.title}{task.is_overdue ? <em className="task-overdue-badge">Overdue</em> : null}</span>
+                    <b className={`today-priority ${task.priority}`}>{task.priority}</b>
+                    <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
+                    <div className="priority-row-actions">
+                      <button aria-label={`Edit ${task.title}`} className="priority-edit-button" disabled={busy} onClick={() => editTask(task)} title="Edit task" type="button"><TodayIcon name="edit" size={17} /></button>
+                      <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete task" type="button"><TodayIcon name="trash" size={17} /></button>
+                    </div>
+                  </article>
+                ))}
+                {showAddTask && editingTaskId && editingTaskDate === comparisonDate ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">Save changes</button><button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button></form> : null}
+              </div>
+            </section>
+          ) : null}
+          <section
+            className={`today-card today-plan-card ${dragOverDate === today ? "drag-over" : ""}`}
+            onDragLeave={() => setDragOverDate(null)}
+            onDragOver={(event) => allowTaskDrop(event, today)}
+            onDrop={(event) => dropTask(event, today)}
+          >
             <div className="today-plan-heading"><div><h2>Today’s Plan</h2><span>{tasks.length} tasks</span></div></div>
 
             <div className="today-progress-card">
               <div className="today-progress-ring"><svg viewBox="0 0 80 80"><circle className="track" cx="40" cy="40" r="34" /><circle className="value" cx="40" cy="40" r="34" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - completion / 100)} /></svg><strong>{completion}%</strong></div>
-              <div className="progress-copy"><strong>Daily Progress</strong><span>{dashboard?.completed_tasks ?? 0} of {dashboard?.planned_tasks ?? tasks.length} tasks completed</span></div>
+              <div className="progress-copy"><strong>Daily Progress</strong><span>Focused time + priority weighted</span></div>
               <div className="progress-divider" />
               <span className="progress-metric-icon blue"><TodayIcon name="clock" /></span><div className="progress-copy"><strong>Focus Time</strong><span>{formatMinutes(dashboard?.focus_minutes ?? 0)} / {formatHours(plannedFocusMinutes)}</span></div>
               <div className="progress-divider" />
@@ -336,8 +483,8 @@ export default function TodayPage() {
             <div className="today-work-list">
               {loading ? <p className="today-empty">Loading today’s plan…</p> : null}
               {!loading && !sortedTasks.length ? <p className="today-empty">No tasks yet. Add the first task for today.</p> : null}
-              {sortedTasks.map((task) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""} ${task.is_overdue ? "overdue" : ""}`} key={task.id}>
-                <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className={`plan-completion-toggle ${task.status === "completed" ? "completed" : ""}`} disabled={busy} onClick={() => setStatus(task, task.status === "completed" ? "pending" : "completed")} title={task.status === "completed" ? "Reopen task" : "Mark complete"} type="button">{task.status === "completed" ? <TodayIcon name="check" size={12} /> : null}</button>
+              {sortedTasks.map((task) => <article className={`today-work-row ${task.status === "completed" ? "completed" : ""} ${task.is_overdue ? "overdue" : ""} ${draggedTaskId === task.id ? "dragging" : ""}`} key={task.id}>
+                <button aria-label={`Drag ${task.title} to another day`} className={`plan-completion-toggle task-drag-handle ${task.status === "completed" ? "completed" : ""}`} disabled={busy} draggable={Boolean(comparisonDirection)} onClick={() => setStatus(task, task.status === "completed" ? "pending" : "completed")} onDragEnd={finishTaskDrag} onDragStart={(event) => startTaskDrag(event, task)} title={comparisonDirection ? "Click to complete or drag to another day" : task.status === "completed" ? "Reopen task" : "Mark complete"} type="button">{task.status === "completed" ? <TodayIcon name="check" size={12} /> : null}</button>
                 <span className="priority-title">{task.title}{task.is_overdue ? <em className="task-overdue-badge">Overdue</em> : null}</span>
                 <b className={`today-priority ${task.priority}`}>{task.priority}</b>
                 <small>{task.estimated_minutes ? `Est. ${formatHours(task.estimated_minutes)}` : "Flexible"}</small>
@@ -346,43 +493,43 @@ export default function TodayPage() {
                   <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete task" type="button"><TodayIcon name="trash" size={17} /></button>
                 </div>
               </article>)}
-              {showAddTask ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">{editingTaskId ? "Save changes" : "Add task"}</button><button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button></form> : null}
-              {!showAddTask ? <button className="today-add-bottom" onClick={() => { setEditingTaskId(null); setShowAddTask(true); }} type="button">＋ Add Task</button> : null}
+              {showAddTask && (!editingTaskId || editingTaskDate === today) ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">{editingTaskId ? "Save changes" : "Add task"}</button><button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button></form> : null}
+              {!showAddTask ? <button className="today-add-bottom" onClick={() => { setEditingTaskId(null); setEditingTaskDate(today); setShowAddTask(true); }} type="button">＋ Add Task</button> : null}
             </div>
           </section>
 
-          <section className="today-card rollover-proposals-card">
-            <div className="rollover-proposals-heading">
-              <div className="rollover-proposals-title">
-                <span className="rollover-proposals-icon"><TodayIcon name="calendar" size={18} /></span>
-                <div><h2>Rollover proposals</h2><p>Review suggested dates before unfinished tasks are moved.</p></div>
-              </div>
-              <button className="rollover-check-button" disabled={busy} onClick={generateRolloverProposal} type="button"><TodayIcon name="spark" size={14} />Check unfinished work</button>
-            </div>
-            {proposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved").length === 0 ? (
-              <div className="rollover-empty-state">
-                <span><TodayIcon name="check" size={15} /></span>
-                <div><strong>Your schedule is up to date</strong><p>No rollover proposals need confirmation.</p></div>
-              </div>
-            ) : null}
-            {proposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved").map((proposal) => (
-              <article className="rollover-proposal" key={proposal.id}>
-                <div><strong>Proposal #{proposal.id}</strong><span className={`proposal-status ${proposal.status}`}>{proposal.status}</span></div>
-                <p>{proposal.reason}</p>
-                <ul>{proposal.items.map((item) => <li key={item.id}><span>Task #{item.daily_task_id}</span><b>{item.original_date} → {item.proposed_date}</b><small>{formatMinutes(item.estimated_minutes)}</small></li>)}</ul>
-                <div className="proposal-actions">
-                  {proposal.status === "pending" ? <button disabled={busy} onClick={() => updateProposal(proposal, "approve")} type="button">Approve</button> : null}
-                  {proposal.status === "approved" ? <button disabled={busy} onClick={() => updateProposal(proposal, "apply")} type="button">Apply changes</button> : null}
-                  <button className="secondary" disabled={busy} onClick={() => updateProposal(proposal, "reject")} type="button">Reject</button>
-                </div>
-              </article>
-            ))}
-          </section>
+          <DailyReviewModule
+            dashboard={dashboard}
+            date={today}
+            tasks={tasks}
+          />
 
           <section className="today-card ai-plan-card ai-plan-main-card">
-            <div className="side-card-heading"><h2>Today’s AI Plan</h2><span>Based on weekly goals + today’s condition</span></div><p>Generate or refine today’s plan.</p>
-            {generatedPlan ? <div className="adaptive-inline"><strong>{Math.round(generatedPlan.readiness_score)} readiness</strong><span>{generatedPlan.adjusted_available_minutes} min capacity · {generatedPlan.workload_level} workload</span></div> : null}
-            <div className="ai-plan-actions"><article><h3><b>1</b> Generate Plan</h3><p>Create today’s plan from weekly goals, energy, mood and available time.</p><button disabled={busy} onClick={() => generatePlan()} type="button"><TodayIcon name="spark" /> Generate Plan</button></article><article className="ai-adjust-card"><h3><b>2</b> Adjust Plan</h3><form className="ai-adjust-form" onSubmit={adjustPlan}><input aria-label="Tell AI how to adjust today's plan" disabled={busy} maxLength={1000} onChange={(event) => setPlanInstruction(event.target.value)} placeholder="e.g. Make it lighter and prioritize API work" value={planInstruction} /><button aria-label="Adjust plan with AI" disabled={busy || !planInstruction.trim()} title="Adjust plan with AI" type="submit"><TodayIcon name="spark" size={15} /></button></form></article></div>
+            <div className="side-card-heading"><h2>Plan Preview</h2><span>Nothing changes until you confirm</span></div><p>Preview a calibrated plan for today or tomorrow.</p>
+            <div className="daily-preview-tabs">
+              <button className={previewDate === today ? "active" : ""} onClick={() => setPreviewDate(today)} type="button">Today</button>
+              <button className={previewDate === tomorrow ? "active" : ""} onClick={() => setPreviewDate(tomorrow)} type="button">Tomorrow</button>
+            </div>
+            {dailyPreviews[previewDate] ? <div className="adaptive-inline"><strong>{Math.round(dailyPreviews[previewDate]!.readiness_score)} readiness</strong><span>{dailyPreviews[previewDate]!.recommended_minutes} min planned · {dailyPreviews[previewDate]!.calibration.factor.toFixed(2)}× estimate calibration</span></div> : null}
+            {dailyPreviews[previewDate]?.tasks.length ? <div className="daily-preview-list">{dailyPreviews[previewDate]!.tasks.map((task, index) => <div key={`${task.title}-${index}`}><span>{task.title}</span><b className={task.priority}>{task.priority}</b><small>{formatMinutes(task.estimated_minutes)}</small></div>)}</div> : null}
+            <div className="ai-plan-actions">
+              <article>
+                <h3><b>1</b> Build Preview</h3>
+                <p>Use weekly goals, check-in data, history, and linked focus sessions.</p>
+                <button disabled={busy} onClick={() => generatePlan(previewDate)} type="button">
+                  <TodayIcon name="spark" />
+                  {planAction === "build" ? "Building preview…" : dailyPreviews[previewDate] ? "Regenerate Preview" : "Generate Preview"}
+                </button>
+              </article>
+              <article className="ai-adjust-card">
+                <h3><b>2</b> Refine & Confirm</h3>
+                <form className="ai-adjust-form" onSubmit={adjustPlan}>
+                  <input aria-label="Tell AI how to adjust the plan preview" disabled={busy} maxLength={1000} onChange={(event) => setPlanInstruction(event.target.value)} placeholder="e.g. Make it lighter and prioritize API work" value={planInstruction} />
+                  <button aria-label="Adjust plan preview with AI" disabled={busy || !planInstruction.trim() || !dailyPreviews[previewDate]} title={dailyPreviews[previewDate] ? "Adjust preview" : "Build a preview first"} type="submit"><TodayIcon name="spark" size={15} /></button>
+                </form>
+                {planAction === "refine" ? <span className="preview-working">Refining the current preview…</span> : dailyPreviews[previewDate]?.status === "pending" ? <button className="confirm-plan-preview" disabled={busy} onClick={() => confirmPlanPreview(dailyPreviews[previewDate]!)} type="button"><TodayIcon name="check" size={14} /> {planAction === "confirm" ? "Confirming…" : `Confirm ${previewDate === today ? "Today" : "Tomorrow"}`}</button> : dailyPreviews[previewDate]?.status === "confirmed" ? <span className="preview-confirmed"><TodayIcon name="check" size={13} /> Confirmed</span> : null}
+              </article>
+            </div>
           </section>
         </main>
 
@@ -399,7 +546,6 @@ export default function TodayPage() {
             <button className="update-checkin-button" disabled={busy} type="submit"><TodayIcon name="check" size={15} /> {dashboard?.check_in ? "Update Check-in" : "Save Check-in"}</button>
           </form>
 
-          <Link className="today-card reflection-button" href="/review"><TodayIcon name="edit" /> Start Reflection</Link>
         </aside>
       </div>
     </section>

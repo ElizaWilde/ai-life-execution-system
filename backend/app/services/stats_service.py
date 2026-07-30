@@ -76,6 +76,7 @@ class StatsService:
             planned_tasks=planned_tasks,
             completed_tasks=completed_tasks,
             completion_rate=self._completion_rate(completed_tasks, planned_tasks),
+            weighted_progress_rate=self._weighted_daily_progress(tasks, sessions),
             tasks=tasks,
             unfinished_tasks=unfinished_tasks,
             time_allocation=self._time_allocation(tasks, sessions),
@@ -240,6 +241,43 @@ class StatsService:
             )
         )
         return sum(session.duration_minutes or 0 for session in sessions)
+
+    @staticmethod
+    def _weighted_daily_progress(
+        tasks: list[DailyTask],
+        sessions: list[StudySession],
+    ) -> float:
+        """Score execution using task importance and linked focused time."""
+        active_tasks = [task for task in tasks if task.status != "cancelled"]
+        if not active_tasks:
+            return 0.0
+
+        focused_by_task: dict[int, int] = {}
+        for session in sessions:
+            if session.daily_task_id is None:
+                continue
+            focused_by_task[session.daily_task_id] = (
+                focused_by_task.get(session.daily_task_id, 0)
+                + (session.duration_minutes or 0)
+            )
+
+        priority_weights = {"high": 1.5, "medium": 1.0, "low": 0.75}
+        earned_weight = 0.0
+        total_weight = 0.0
+        for task in active_tasks:
+            estimated_minutes = max(task.estimated_minutes or 30, 1)
+            task_weight = estimated_minutes * priority_weights.get(task.priority, 1.0)
+            if task.status == "completed":
+                progress = 1.0
+            else:
+                progress = min(
+                    focused_by_task.get(task.id, 0) / estimated_minutes,
+                    1.0,
+                )
+            total_weight += task_weight
+            earned_weight += task_weight * progress
+
+        return earned_weight / total_weight if total_weight else 0.0
 
     @staticmethod
     def _coaching_response(

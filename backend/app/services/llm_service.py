@@ -103,6 +103,7 @@ class LLMService:
         unfinished_tasks: list[dict],
         available_minutes: int,
         user_instruction: str | None = None,
+        current_preview: list[dict] | None = None,
     ) -> list[dict]:
         system_prompt = """
 You are a planning assistant.
@@ -117,6 +118,11 @@ Rules:
 - Split large goals into small tasks.
 - Each task must have a title, estimated_minutes, priority, and weekly_goal_id
   matching one of the listed weekly goals.
+- When a current preview and a user adjustment request are supplied, revise that
+  preview directly. Treat it as the source of truth, preserve unaffected tasks,
+  and obey the adjustment request.
+- While refining, do not add tasks that are absent from the current preview
+  unless the user explicitly asks for new tasks.
 - Output JSON only.
 """
 
@@ -126,6 +132,9 @@ Weekly goals:
 
 Unfinished tasks:
 {json.dumps(unfinished_tasks, ensure_ascii=False, indent=2)}
+
+Current preview to refine:
+{json.dumps(current_preview or [], ensure_ascii=False, indent=2)}
 
 Available minutes today:
 {available_minutes}

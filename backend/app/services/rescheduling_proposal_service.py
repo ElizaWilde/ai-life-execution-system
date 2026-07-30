@@ -309,6 +309,21 @@ class ReschedulingProposalService:
         db.commit()
         return self.get(db, user_id, proposal_id)
 
+    def confirm(
+        self,
+        db: Session,
+        user_id: int,
+        proposal_id: int,
+        now: datetime | None = None,
+    ) -> ReschedulingProposal:
+        """Approve and apply a rollover after one explicit user confirmation."""
+        proposal = self.get(db, user_id, proposal_id)
+        if proposal.status == "applied":
+            return proposal
+        if proposal.status == "pending":
+            self.approve(db, user_id, proposal_id, now)
+        return self.apply(db, user_id, proposal_id, now)
+
     def expire_stale(self, db: Session, user_id: int) -> int:
         now = datetime.now(timezone.utc)
         proposals = list(

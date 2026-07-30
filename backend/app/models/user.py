@@ -63,6 +63,22 @@ class User(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    automation_audits: Mapped[list["AutomationAudit"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    automation_commands: Mapped[list["AutomationCommand"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    procrastination_events: Mapped[list["ProcrastinationEvent"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    forecast_history: Mapped[list["ForecastHistory"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     notifications: Mapped[list["Notification"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -72,6 +88,10 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     rescheduling_proposals: Mapped[list["ReschedulingProposal"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    plan_previews: Mapped[list["PlanPreview"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

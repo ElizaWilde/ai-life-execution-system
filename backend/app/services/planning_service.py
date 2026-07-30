@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 from app.models import DailyTask, WeeklyGoal
 from app.schemas.daily_task import DailyPlanResponse
 from app.services.coaching_context_service import coaching_context_service
+from app.services.estimation_calibration_service import (
+    EstimationCalibration,
+    estimation_calibration_service,
+)
 from app.services.llm_service import llm_service
 from app.services.workload_adjustment_service import workload_adjustment_service
 from app.services.task_deadline_service import task_deadline_service
@@ -35,6 +39,53 @@ class PlanningService:
         user_instruction: str | None = None,
     ) -> DailyPlanResponse:
         plan_date = task_date or date.today()
+        preview = await self.build_daily_preview(
+            db=db,
+            user_id=user_id,
+            available_minutes=available_minutes,
+            task_date=plan_date,
+            user_instruction=user_instruction,
+        )
+        weekly_goals = preview["weekly_goals"]
+        allowed_goal_ids = {goal.id for goal in weekly_goals}
+        self._remove_pending_ai_plan(db, user_id, plan_date)
+        created_tasks = self._create_tasks_from_plan(
+            db=db,
+            user_id=user_id,
+            plan_date=plan_date,
+            generated_items=preview["tasks"],
+            allowed_goal_ids=allowed_goal_ids,
+            default_goal_id=weekly_goals[0].id,
+            available_minutes=preview["adjusted_available_minutes"],
+        )
+
+        db.commit()
+        for task in created_tasks:
+            db.refresh(task)
+
+        return DailyPlanResponse(
+            task_date=plan_date,
+            original_available_minutes=available_minutes,
+            adjusted_available_minutes=preview["adjusted_available_minutes"],
+            workload_level=preview["workload_level"],
+            readiness_score=preview["readiness_score"],
+            tasks=created_tasks,
+            total_estimated_minutes=sum(
+                task.estimated_minutes or 0 for task in created_tasks
+            ),
+        )
+
+    async def build_daily_preview(
+        self,
+        db: Session,
+        user_id: int,
+        available_minutes: int,
+        task_date: date,
+        user_instruction: str | None = None,
+        current_preview: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Generate calibrated plan data without modifying any tasks."""
+        plan_date = task_date
         context = coaching_context_service.build_daily_context(
             db=db,
             user_id=user_id,
@@ -55,7 +106,6 @@ class PlanningService:
             )
 
         allowed_goal_ids = {goal.id for goal in weekly_goals}
-        self._remove_pending_ai_plan(db, user_id, plan_date)
         unfinished_tasks = self._get_unfinished_tasks(
             db,
             user_id,
@@ -74,33 +124,76 @@ class PlanningService:
         }
         if user_instruction and user_instruction.strip():
             generation_arguments["user_instruction"] = user_instruction.strip()
+            if current_preview is not None:
+                generation_arguments["current_preview"] = current_preview
         generated_items = await llm_service.generate_daily_plan(**generation_arguments)
-
-        created_tasks = self._create_tasks_from_plan(
-            db=db,
-            user_id=user_id,
-            plan_date=plan_date,
-            generated_items=generated_items,
-            allowed_goal_ids=allowed_goal_ids,
-            default_goal_id=weekly_goals[0].id,
-            available_minutes=adjusted_minutes,
+        calibration = estimation_calibration_service.calculate(db, user_id)
+        tasks = self._normalize_preview_items(
+            generated_items,
+            allowed_goal_ids,
+            weekly_goals[0].id,
+            adjusted_minutes,
+            calibration,
         )
+        return {
+            "weekly_goals": weekly_goals,
+            "tasks": tasks,
+            "adjusted_available_minutes": adjusted_minutes,
+            "workload_level": adjustment.workload_level,
+            "readiness_score": adjustment.readiness_score,
+            "calibration": calibration,
+        }
 
-        db.commit()
-        for task in created_tasks:
-            db.refresh(task)
-
-        return DailyPlanResponse(
-            task_date=plan_date,
-            original_available_minutes=available_minutes,
-            adjusted_available_minutes=adjusted_minutes,
-            workload_level=adjustment.workload_level,
-            readiness_score=adjustment.readiness_score,
-            tasks=created_tasks,
-            total_estimated_minutes=sum(
-                task.estimated_minutes or 0 for task in created_tasks
-            ),
+    def _normalize_preview_items(
+        self,
+        generated_items: list[dict[str, Any]],
+        allowed_goal_ids: set[int],
+        default_goal_id: int,
+        available_minutes: int,
+        calibration: EstimationCalibration,
+    ) -> list[dict[str, Any]]:
+        normalized_items = [
+            normalized
+            for item in generated_items
+            if (
+                normalized := self._normalize_plan_item(
+                    item,
+                    allowed_goal_ids,
+                    default_goal_id,
+                )
+            )
+            is not None
+        ]
+        normalized_items = list(
+            {item["title"].casefold(): item for item in normalized_items}.values()
         )
+        normalized_items.sort(key=lambda item: PRIORITY_ORDER[item["priority"]])
+
+        preview_items: list[dict[str, Any]] = []
+        remaining = available_minutes
+        for item in normalized_items:
+            original = item["estimated_minutes"] or 30
+            calibrated = estimation_calibration_service.apply(
+                original,
+                calibration.factor,
+            )
+            if calibrated > remaining:
+                if preview_items:
+                    continue
+                calibrated = remaining
+            if calibrated <= 0:
+                continue
+            preview_items.append(
+                {
+                    **item,
+                    "original_estimated_minutes": original,
+                    "estimated_minutes": calibrated,
+                }
+            )
+            remaining -= calibrated
+            if remaining <= 0:
+                break
+        return preview_items
 
     def _get_active_weekly_goals(
         self,

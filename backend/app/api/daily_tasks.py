@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 # select() creates a database SELECT statement.SQLAlchemy uses select() to construct queries that can then be executed through a Session.
 from sqlalchemy import select
 #Session is SQLAlchemy’s database-working object.A SQLAlchemy Session manages ORM objects and provides the interface for querying and modifying database data
@@ -109,6 +109,27 @@ def get_today_tasks(
     )
 
 
+@router.get("", response_model=list[DailyTaskRead])
+def get_tasks_for_date(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    task_date: Annotated[
+        date,
+        Query(alias="date", description="Date whose plan should be returned."),
+    ],
+) -> list[DailyTask]:
+    return list(
+        db.scalars(
+            select(DailyTask)
+            .where(
+                DailyTask.user_id == user.id,
+                DailyTask.task_date == task_date,
+            )
+            .order_by(DailyTask.status, DailyTask.priority.desc(), DailyTask.id)
+        )
+    )
+
+
 @router.post("/generate", response_model=DailyPlanResponse, status_code=status.HTTP_201_CREATED)
 # An async def function can pause while waiting for slow operations. While it is paused, FastAPI can process other requests.
 # async def defines a function that can pause without blocking the server.
@@ -175,6 +196,13 @@ def update_daily_task(
     # Update each provided field
     for field, value in changes.items():
         setattr(task, field, value)
+    if "task_date" in changes:
+        task.due_at = task_deadline_service.calculate(
+            db,
+            user.id,
+            task.task_date,
+            task.planning_scope,
+        )
     # checks whether the client explicitly updated the status    
     if "status" in changes:
         task.completed_at = (

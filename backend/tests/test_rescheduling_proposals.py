@@ -185,3 +185,35 @@ def test_rejected_proposal_cannot_be_applied(client, user_headers):
     assert rejected.status_code == 200
     assert rejected.json()["status"] == "rejected"
     assert apply_result.status_code == 409
+
+
+def test_confirmed_rollover_approves_and_applies_in_one_action(client, user_headers):
+    add_automation_settings()
+    now = datetime.now(timezone.utc)
+    created = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Confirm this rollover",
+            "task_date": (now.date() - timedelta(days=1)).isoformat(),
+            "due_at": (now - timedelta(hours=1)).isoformat(),
+            "estimated_minutes": 30,
+        },
+    ).json()
+    proposal = client.post(
+        "/automation/rescheduling-proposals",
+        headers=user_headers,
+        json={},
+    ).json()
+
+    confirmed = client.post(
+        f"/automation/proposals/{proposal['id']}/confirm",
+        headers=user_headers,
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "applied"
+    with TestingSessionLocal() as db:
+        task = db.get(DailyTask, created["id"])
+        assert task is not None
+        assert task.task_date.isoformat() == proposal["items"][0]["proposed_date"]

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 
 
 def test_manually_create_daily_task(client, user_headers):
@@ -21,6 +21,58 @@ def test_manually_create_daily_task(client, user_headers):
 
     assert today.status_code == 200
     assert [task["id"] for task in today.json()] == [response.json()["id"]]
+
+
+def test_get_daily_tasks_for_a_specific_date(client, user_headers):
+    adjacent_date = date.today() + timedelta(days=1)
+    created = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Tomorrow comparison task",
+            "task_date": adjacent_date.isoformat(),
+            "estimated_minutes": 60,
+            "priority": "medium",
+        },
+    ).json()
+
+    response = client.get(
+        f"/daily-tasks?date={adjacent_date.isoformat()}",
+        headers=user_headers,
+    )
+
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()] == [created["id"]]
+
+
+def test_move_task_to_another_date_recalculates_deadline(client, user_headers):
+    original_date = date.today()
+    target_date = original_date + timedelta(days=1)
+    created = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Move between daily plans",
+            "task_date": original_date.isoformat(),
+            "estimated_minutes": 30,
+        },
+    ).json()
+
+    moved = client.patch(
+        f"/daily-tasks/{created['id']}",
+        headers=user_headers,
+        json={"task_date": target_date.isoformat()},
+    )
+
+    assert moved.status_code == 200
+    assert moved.json()["task_date"] == target_date.isoformat()
+    original_due = datetime.fromisoformat(created["due_at"])
+    moved_due = datetime.fromisoformat(moved.json()["due_at"])
+    assert moved_due - original_due == timedelta(days=1)
+    assert client.get(
+        f"/daily-tasks?date={target_date.isoformat()}",
+        headers=user_headers,
+    ).json()[0]["id"] == created["id"]
 
 
 def test_delete_daily_task(client, user_headers):

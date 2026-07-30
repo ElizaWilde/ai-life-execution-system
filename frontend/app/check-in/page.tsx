@@ -6,6 +6,7 @@ import { announceCheckInUpdate, subscribeToCheckInUpdates } from "../../lib/chec
 import { AVAILABLE_TIME_OPTIONS, availableTimeBucket } from "../../lib/check-in-options";
 import {
   api,
+  AutomationCommand,
   CoachingRecommendation,
   DailyCheckIn,
   EnergyLevel,
@@ -83,6 +84,9 @@ export default function CheckInPage() {
   const [coachingBusy, setCoachingBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [commandText, setCommandText] = useState("");
+  const [command, setCommand] = useState<AutomationCommand | null>(null);
+  const [commandBusy, setCommandBusy] = useState(false);
 
   async function loadCheckIn() {
     try {
@@ -105,6 +109,13 @@ export default function CheckInPage() {
       setCoaching(await api.getCoaching(today));
     } catch {
       setCoaching(null);
+    }
+
+    try {
+      const commands = await api.getCommands();
+      setCommand(commands[0] ?? null);
+    } catch {
+      setCommand(null);
     }
   }
 
@@ -167,6 +178,37 @@ export default function CheckInPage() {
       }
     } finally {
       setCoachingBusy(false);
+    }
+  }
+
+  async function submitCommand(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!commandText.trim()) return;
+    setCommandBusy(true);
+    setError("");
+    try {
+      const result = await api.executeCommand(commandText.trim(), crypto.randomUUID());
+      setCommand(result);
+      setCommandText("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to process command");
+    } finally {
+      setCommandBusy(false);
+    }
+  }
+
+  async function decideCommand(action: "confirm" | "reject") {
+    if (!command) return;
+    setCommandBusy(true);
+    setError("");
+    try {
+      setCommand(action === "confirm"
+        ? await api.confirmCommand(command.id)
+        : await api.rejectCommand(command.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update command");
+    } finally {
+      setCommandBusy(false);
     }
   }
 
@@ -247,6 +289,15 @@ export default function CheckInPage() {
             <p className="condition-card-label"><ConditionIcon name="spark" size={22} /> AI Coach</p>
             <div className="condition-coach-message"><ConditionIcon name="spark" size={25} /><p>{coaching?.summary ?? "Save today’s check-in, then generate a recommendation matched to your capacity."}</p></div>
             <button className="button secondary condition-coach-action" disabled={!saved || coachingBusy || Boolean(coaching)} onClick={generateCoaching} type="button"><ConditionIcon name="spark" size={18} /> {coachingBusy ? "Generating…" : coaching ? "Recommendation saved" : "Generate today’s coaching"}</button>
+            <div className="coordinator-command">
+              <div><strong>Command your assistant</strong><small>Try “Show my forecast”, “What should I focus on?”, or “Move overdue tasks”.</small></div>
+              <form onSubmit={submitCommand}><input aria-label="Natural-language command" disabled={commandBusy} maxLength={2000} onChange={(event) => setCommandText(event.target.value)} placeholder="Tell the coordinator what you need…" value={commandText} /><button disabled={commandBusy || !commandText.trim()} type="submit"><ConditionIcon name="spark" size={16} /> Run</button></form>
+              {command ? <div className={`command-result ${command.status}`}>
+                <span><b>{command.intent.replaceAll("_", " ")}</b><em>{command.status.replaceAll("_", " ")}</em></span>
+                <p>{command.response_message}</p>
+                {command.status === "pending_confirmation" ? <div><button disabled={commandBusy} onClick={() => decideCommand("reject")} type="button">Reject</button><button disabled={commandBusy} onClick={() => decideCommand("confirm")} type="button">Confirm change</button></div> : null}
+              </div> : null}
+            </div>
           </article>
 
           <article className="card next-step-card condition-next-card">

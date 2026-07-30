@@ -203,6 +203,7 @@ export type TodayDashboard = {
   planned_tasks: number;
   completed_tasks: number;
   completion_rate: number;
+  weighted_progress_rate: number;
   tasks: DailyTask[];
   unfinished_tasks: DailyTask[];
   time_allocation: TimeAllocationPoint[];
@@ -250,6 +251,106 @@ export type AdaptiveDailyPlan = {
   readiness_score: number;
   tasks: DailyTask[];
   total_estimated_minutes: number;
+};
+
+export type EstimationCalibration = {
+  factor: number;
+  sample_count: number;
+  planned_minutes: number;
+  actual_minutes: number;
+  confidence: "none" | "low" | "medium" | "high";
+};
+
+export type DailyPlanPreview = {
+  id: number;
+  status: "pending" | "confirmed" | "expired";
+  target_date: string;
+  input_minutes: number;
+  recommended_minutes: number;
+  calibration: EstimationCalibration;
+  workload_level: WorkloadLevel;
+  readiness_score: number;
+  tasks: {
+    title: string;
+    description: string | null;
+    estimated_minutes: number;
+    original_estimated_minutes: number;
+    priority: Priority;
+    weekly_goal_id: number;
+  }[];
+  expires_at: string;
+  confirmed_at: string | null;
+  created_at: string;
+};
+
+export type WeeklyPlanPreview = {
+  id: number;
+  status: "pending" | "confirmed" | "expired";
+  week_start: string;
+  week_end: string;
+  intended_minutes: number;
+  recommended_minutes: number;
+  historical_weekly_focus_minutes: number;
+  historical_completion_rate: number;
+  calibration: EstimationCalibration;
+  rationale: string[];
+  goal_allocations: {
+    weekly_goal_id: number;
+    title: string;
+    priority: Priority;
+    current_minutes: number;
+    recommended_minutes: number;
+  }[];
+  daily_allocations: { date: string; minutes: number }[];
+  expires_at: string;
+  confirmed_at: string | null;
+  created_at: string;
+};
+
+export type AutomationCommand = {
+  id: number;
+  user_id: number;
+  idempotency_key: string;
+  command_text: string;
+  intent: "create_reminder" | "reschedule_task" | "reduce_workload" | "get_progress" | "get_forecast" | "get_coaching" | "complete_task" | "unknown";
+  parameters_json: Record<string, unknown>;
+  status: "pending_confirmation" | "completed" | "rejected" | "failed" | "unknown";
+  requires_confirmation: boolean;
+  response_message: string;
+  result_json: Record<string, unknown>;
+  expires_at: string | null;
+  confirmed_at: string | null;
+  rejected_at: string | null;
+  executed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProcrastinationEvent = {
+  id: number;
+  detection_type: string;
+  severity: "low" | "medium" | "high";
+  evidence_json: string[];
+  related_task_ids_json: number[];
+  confidence: number;
+  recommended_intervention: string;
+  status: "active" | "resolved" | "dismissed";
+  detected_at: string;
+};
+
+export type CompletionForecast = {
+  id: number;
+  weekly_goal_id: number;
+  forecast_date: string;
+  completion_probability: number;
+  risk_level: "low" | "medium" | "high";
+  remaining_minutes: number;
+  remaining_days: number;
+  required_daily_minutes: number;
+  current_daily_minutes: number;
+  risk_factors_json: string[];
+  recommended_adjustment: string;
+  predicted_at: string;
 };
 
 export type TimeAllocationPoint = {
@@ -316,6 +417,7 @@ export type WeeklyReview = {
 type RequestOptions = {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string>;
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -324,6 +426,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     headers: {
       "Content-Type": "application/json",
       "X-User-ID": getStoredUserId(),
+      ...options.headers,
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
@@ -418,6 +521,8 @@ export const api = {
     request<void>(`/phases/${phaseId}/milestones/${milestoneId}`, { method: "DELETE" }),
 
   getTodayTasks: () => request<DailyTask[]>("/daily-tasks/today"),
+  getTasksForDate: (date: string) =>
+    request<DailyTask[]>(`/daily-tasks?date=${encodeURIComponent(date)}`),
   createTask: (body: {
     title: string;
     description?: string | null;
@@ -457,6 +562,10 @@ export const api = {
     request<ReschedulingProposal>(`/automation/proposals/${id}/apply`, {
       method: "POST",
     }),
+  confirmReschedulingProposal: (id: number) =>
+    request<ReschedulingProposal>(`/automation/proposals/${id}/confirm`, {
+      method: "POST",
+    }),
 
   getParkedThoughts: () => request<ParkedThought[]>("/parked-thoughts"),
   createParkedThought: (content: string) =>
@@ -470,6 +579,65 @@ export const api = {
       "/daily-tasks/generate",
       { method: "POST", body },
     ),
+  getEstimationCalibration: () =>
+    request<EstimationCalibration>("/planning/calibration"),
+  createDailyPlanPreview: (body: {
+    target_date: string;
+    available_minutes: number;
+    user_instruction?: string;
+    base_preview_id?: number;
+  }) => request<DailyPlanPreview>("/planning/daily-previews", {
+    method: "POST",
+    body,
+  }),
+  getLatestDailyPlanPreview: (targetDate: string) =>
+    request<DailyPlanPreview | null>(
+      `/planning/daily-previews/latest?target_date=${encodeURIComponent(targetDate)}`,
+    ),
+  confirmDailyPlanPreview: (id: number) =>
+    request<DailyPlanPreview>(`/planning/daily-previews/${id}/confirm`, {
+      method: "POST",
+    }),
+  createWeeklyPlanPreview: (body: { week_start: string; intended_minutes: number }) =>
+    request<WeeklyPlanPreview>("/planning/weekly-previews", {
+      method: "POST",
+      body,
+    }),
+  getLatestWeeklyPlanPreview: (weekStart: string) =>
+    request<WeeklyPlanPreview | null>(
+      `/planning/weekly-previews/latest?week_start=${encodeURIComponent(weekStart)}`,
+    ),
+  confirmWeeklyPlanPreview: (id: number) =>
+    request<WeeklyPlanPreview>(`/planning/weekly-previews/${id}/confirm`, {
+      method: "POST",
+    }),
+  executeCommand: (message: string, idempotencyKey: string) =>
+    request<AutomationCommand>("/coordinator/commands", {
+      method: "POST",
+      body: { message },
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+  getCommands: () => request<AutomationCommand[]>("/coordinator/commands"),
+  confirmCommand: (id: number) =>
+    request<AutomationCommand>(`/coordinator/commands/${id}/confirm`, {
+      method: "POST",
+    }),
+  rejectCommand: (id: number) =>
+    request<AutomationCommand>(`/coordinator/commands/${id}/reject`, {
+      method: "POST",
+    }),
+  getForecasts: () =>
+    request<CompletionForecast[]>("/automation/forecasts?latest_only=true"),
+  recalculateForecasts: () =>
+    request<CompletionForecast[]>("/automation/forecasts/recalculate", {
+      method: "POST",
+    }),
+  getProcrastinationEvents: () =>
+    request<ProcrastinationEvent[]>("/automation/procrastination-events"),
+  detectProcrastinationEvents: () =>
+    request<ProcrastinationEvent[]>("/automation/procrastination-events/detect", {
+      method: "POST",
+    }),
 
   getTodayCheckIn: () => request<DailyCheckIn>("/check-ins/today"),
   createCheckIn: (body: {

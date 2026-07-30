@@ -1,11 +1,16 @@
 from app.models.automation_preference import AutomationPreference
+from app.models.automation_audit import AutomationAudit
+from app.models.automation_command import AutomationCommand
 from app.models.coaching_recommendation import CoachingRecommendation
 from app.models.daily_check_in import DailyCheckIn
 from app.models.daily_review import DailyReview
 from app.models.daily_task import DailyTask
 from app.models.notification import Notification
+from app.models.forecast_history import ForecastHistory
 from app.models.parked_thought import ParkedThought
 from app.models.phase import Milestone, Phase
+from app.models.plan_preview import PlanPreview
+from app.models.procrastination_event import ProcrastinationEvent
 from app.models.rescheduling_proposal import (
     ReschedulingProposal,
     ReschedulingProposalItem,
@@ -21,12 +26,17 @@ from app.models.weekly_review import WeeklyReview
 '''
 __all__ = [
     "AutomationPreference",
+    "AutomationAudit",
+    "AutomationCommand",
     "CoachingRecommendation",
     "DailyCheckIn",
     "DailyReview",
     "DailyTask",
     "Notification",
+    "ForecastHistory",
     "ParkedThought",
+    "PlanPreview",
+    "ProcrastinationEvent",
     "ReschedulingProposal",
     "ReschedulingProposalItem",
     "Phase",

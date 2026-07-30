@@ -65,13 +65,14 @@ class DailyTaskCreate(DailyTaskBase):
 
 class DailyPlanGenerateRequest(BaseModel):
     available_minutes: int = Field(gt=0, le=1_440)
-    task_date: date | None = None
+    task_date: date = None
     user_instruction: str | None = Field(default=None, max_length=1_000)
 
 
 class DailyTaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
+    task_date: date | None = None
     estimated_minutes: int | None = Field(default=None, ge=0)
     priority: Priority | None = None
     status: TaskStatus | None = None

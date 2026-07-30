@@ -23,6 +23,10 @@ from app.services.automation_policy_service import (
 from app.services.automation_preference_service import automation_preference_service
 from app.services.notification_service import NotificationService, notification_service
 from app.services.overdue_detection_service import overdue_detection_service
+from app.services.procrastination_detection_service import (
+    procrastination_detection_service,
+)
+from app.services.forecast_service import forecast_service
 from app.services.rescheduling_proposal_service import rescheduling_proposal_service
 
 
@@ -294,16 +298,13 @@ class AutomationScheduler:
         created = 0
         for user, preference in self._users_with_preferences(db):
             local_now = self._local_now(now, preference.timezone)
-            findings = overdue_detection_service.find(
-                db,
-                user.id,
-                now,
-                local_date=local_now.date(),
-            )
-            if len(findings) < 2 or self._is_quiet(local_now.time(), preference):
+            events = procrastination_detection_service.detect(db, user.id, now)
+            if not events or self._is_quiet(local_now.time(), preference):
                 continue
-            oldest_minutes = max(item.overdue_minutes for item in findings)
-            oldest_days = oldest_minutes // (24 * 60)
+            highest = sorted(
+                events,
+                key=lambda item: {"high": 0, "medium": 1, "low": 2}[item.severity],
+            )[0]
             created += self._send_once(
                 db,
                 user,
@@ -312,8 +313,9 @@ class AutomationScheduler:
                 notification_type="procrastination_alert",
                 subject="A procrastination pattern may be forming",
                 message=(
-                    f"{len(findings)} tasks are overdue; the oldest is {oldest_days} "
-                    "day(s) late. Consider choosing one small next action."
+                    f"{highest.detection_type.replace('_', ' ').title()} "
+                    f"({highest.severity} risk): "
+                    f"{highest.recommended_intervention}"
                 ),
                 key=f"procrastination:{user.id}:{local_now.date().isoformat()}",
                 counts_toward_reminder_limit=True,
@@ -327,6 +329,31 @@ class AutomationScheduler:
             local_now = self._local_now(now, preference.timezone)
             if self._is_quiet(local_now.time(), preference):
                 continue
+            forecasts = forecast_service.generate_for_user(db, user.id, now)
+            if forecasts:
+                highest = sorted(
+                    forecasts,
+                    key=lambda item: {"high": 0, "medium": 1, "low": 2}[item.risk_level],
+                )[0]
+                created += self._send_once(
+                    db,
+                    user,
+                    preference,
+                    now,
+                    notification_type="completion_forecast",
+                    subject="Weekly completion forecast",
+                    message=(
+                        f"Goal #{highest.weekly_goal_id} has a "
+                        f"{round(highest.completion_probability * 100)}% completion "
+                        f"forecast ({highest.risk_level} risk). "
+                        f"{highest.recommended_adjustment}"
+                    ),
+                    key=f"forecast:{user.id}:{local_now.date().isoformat()}",
+                    counts_toward_reminder_limit=False,
+                )
+                continue
+
+            # Keep a task-only fallback for users who have not created a weekly goal.
             week_start = local_now.date() - timedelta(days=local_now.weekday())
             week_end = week_start + timedelta(days=6)
             tasks = list(
