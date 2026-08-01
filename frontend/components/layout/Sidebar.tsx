@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAppSettings } from "../../lib/settings";
+import CoachCharacter3D from "./CoachCharacter3D";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: "grid" },
@@ -30,10 +31,17 @@ export default function Sidebar() {
   const pathname = usePathname();
   const settings = useAppSettings();
   const initials = settings.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "AL";
+  function startCoachConversation() {
+    window.sessionStorage.removeItem("ai-life-coach-conversation");
+    window.dispatchEvent(new Event("ai-life:start-coach-conversation"));
+  }
   return <aside className="sidebar">
     <Link href="/dashboard" className="brand-lockup"><span className="brand-spark">✦</span><span><strong>AI Life</strong><small>Execution System</small></span></Link>
     <nav>{navItems.map((item) => <Link key={item.href} href={item.href} className={`nav-link ${pathname === item.href ? "active" : ""}`}><NavIcon name={item.icon} />{item.label}</Link>)}</nav>
-    <Link className="sidebar-coach" href="/check-in"><NavIcon name="spark" /> Ask AI Coach</Link>
+    <Link aria-label="Start a new AI Coach conversation" className="sidebar-coach" href="/coach" onClick={startCoachConversation}>
+      <CoachCharacter3D />
+      <span><NavIcon name="spark" /> Start a conversation</span>
+    </Link>
     <div className="sidebar-user"><span className="user-avatar">{initials}</span><div><strong>{settings.name}</strong><small>{settings.email}</small></div><b>⌄</b></div>
   </aside>;
 }

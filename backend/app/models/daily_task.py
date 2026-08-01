@@ -34,6 +34,7 @@ class DailyTask(Base):
     planning_scope: Mapped[str] = mapped_column(String(20), default="daily", index=True)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     estimated_minutes: Mapped[int | None]
+    channel: Mapped[str | None] = mapped_column(String(40), index=True)
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     source: Mapped[str] = mapped_column(String(20), default="manual")

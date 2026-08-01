@@ -35,6 +35,14 @@ function TimerIcon({ name }: { name: "clock" | "cycles" }) {
   );
 }
 
+function formatSessionDuration(session: StudySession) {
+  const totalSeconds = session.duration_seconds ?? (session.duration_minutes ?? 0) * 60;
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes} min`;
+}
+
 export default function TimerPage() {
   const settings = useAppSettings();
   const targetMinutes = Math.max(1, Number(settings.focusMinutes) || 25);
@@ -190,7 +198,12 @@ export default function TimerPage() {
     if (!running) return;
     setError("");
     try {
-      await api.finishSession({ session_id: running.id, notes: notes || null });
+      const focusedSeconds = Math.max(0, targetSeconds - sessionRemainingSeconds);
+      await api.finishSession({
+        session_id: running.id,
+        duration_seconds: focusedSeconds,
+        notes: notes || null,
+      });
       void playTimerCompleteSound(sharedTimer?.endAt ?? `session-finish-${running.id}-${Date.now()}`);
       stopSharedFocusTimer(targetSeconds);
       setSharedTimer(readSharedFocusTimer());
@@ -278,7 +291,7 @@ export default function TimerPage() {
           <h2>Today’s sessions</h2>
           <div className="list">
             {sessions.length === 0 ? <p className="muted">No sessions today.</p> : null}
-            {sessions.map((session) => <article className="item" key={session.id}><div className="item-row"><strong>{session.subject}</strong><span className={`badge ${session.status === "completed" ? "done" : ""}`}>{session.status}</span></div><p className="muted">{session.duration_minutes ?? 0} min{session.notes ? ` · ${session.notes}` : ""}</p></article>)}
+            {sessions.map((session) => <article className="item" key={session.id}><div className="item-row"><strong>{session.subject}</strong><span className={`badge ${session.status === "completed" ? "done" : ""}`}>{session.status}</span></div><p className="muted">{formatSessionDuration(session)}{session.notes ? ` · ${session.notes}` : ""}</p></article>)}
           </div>
         </article>
       </div>

@@ -12,6 +12,7 @@ from app.models import (
     StudySession,
     WeeklyGoal,
 )
+from app.services.study_session_duration import focused_seconds, total_focused_minutes
 from app.schemas.coaching import (
     CoachingRecommendationRead,
     CoachingRecommendationResponse,
@@ -202,7 +203,7 @@ class StatsService:
                 continue
             bucket = buckets.setdefault(
                 task.title,
-                {"planned_minutes": 0, "focus_minutes": 0},
+                {"planned_minutes": 0, "focus_seconds": 0},
             )
             bucket["planned_minutes"] += task.estimated_minutes or 0
 
@@ -210,16 +211,20 @@ class StatsService:
             label = task_titles.get(session.daily_task_id) or session.subject or "Other"
             bucket = buckets.setdefault(
                 label,
-                {"planned_minutes": 0, "focus_minutes": 0},
+                {"planned_minutes": 0, "focus_seconds": 0},
             )
-            bucket["focus_minutes"] += session.duration_minutes or 0
+            bucket["focus_seconds"] += focused_seconds(session)
 
         return [
-            TimeAllocationPoint(label=label, **minutes)
+            TimeAllocationPoint(
+                label=label,
+                planned_minutes=minutes["planned_minutes"],
+                focus_minutes=minutes["focus_seconds"] // 60,
+            )
             for label, minutes in sorted(
                 buckets.items(),
                 key=lambda item: max(
-                    item[1]["planned_minutes"], item[1]["focus_minutes"]
+                    item[1]["planned_minutes"], item[1]["focus_seconds"] // 60
                 ),
                 reverse=True,
             )
@@ -240,7 +245,7 @@ class StatsService:
                 StudySession.started_at < end,
             )
         )
-        return sum(session.duration_minutes or 0 for session in sessions)
+        return total_focused_minutes(sessions)
 
     @staticmethod
     def _weighted_daily_progress(
@@ -258,10 +263,10 @@ class StatsService:
                 continue
             focused_by_task[session.daily_task_id] = (
                 focused_by_task.get(session.daily_task_id, 0)
-                + (session.duration_minutes or 0)
+                + focused_seconds(session)
             )
 
-        priority_weights = {"high": 1.5, "medium": 1.0, "low": 0.75}
+        priority_weights = {"urgent": 1.8, "high": 1.5, "medium": 1.0, "low": 0.75}
         earned_weight = 0.0
         total_weight = 0.0
         for task in active_tasks:
@@ -271,7 +276,7 @@ class StatsService:
                 progress = 1.0
             else:
                 progress = min(
-                    focused_by_task.get(task.id, 0) / estimated_minutes,
+                    focused_by_task.get(task.id, 0) / (estimated_minutes * 60),
                     1.0,
                 )
             total_weight += task_weight

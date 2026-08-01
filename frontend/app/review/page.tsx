@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { api, TodayDashboard, WeekDashboard, WeeklyReview, WorkingDay } from "../../lib/api";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
+import { api, DailyTask, TodayDashboard, WeekDashboard, WeeklyReview, WorkingDay } from "../../lib/api";
 
 function ReviewIcon({ name, size = 18 }: { name: "spark" | "check" | "clock" | "alert" | "calendar"; size?: number }) {
   const paths = {
@@ -81,6 +81,7 @@ export default function ReviewPage() {
   const [activeReviewTab, setActiveReviewTab] = useState<"weekly" | "monthly">("weekly");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -161,6 +162,7 @@ export default function ReviewPage() {
     donutOffset += length;
     return segment;
   });
+  const weeklyColorByLabel = new Map(donutSegments.map((segment) => [segment.label, segment.color]));
   const [hoveredDonutIndex, setHoveredDonutIndex] = useState<number | null>(null);
 
   async function generateWeeklyReview() {
@@ -178,12 +180,40 @@ export default function ReviewPage() {
     }
   }
 
+  async function toggleTaskCompletion(task: DailyTask) {
+    if (!week || updatingTaskId !== null) return;
+    setUpdatingTaskId(task.id);
+    setError("");
+    setMessage("");
+    try {
+      await api.updateTask(task.id, {
+        status: task.status === "completed" ? "pending" : "completed",
+      });
+      const automationPreferences = await api.getAutomationPreferences();
+      const workingDayOffsets = automationPreferences.working_days
+        .map((day) => WORKING_DAY_OFFSET[day])
+        .sort((left, right) => left - right);
+      const [updatedWeek, updatedDays] = await Promise.all([
+        api.getWeekDashboard(week.week_start),
+        Promise.all(
+          workingDayOffsets.map((offset) => api.getDayDashboard(addDays(week.week_start, offset))),
+        ),
+      ]);
+      setWeek(updatedWeek);
+      setWeekDays(updatedDays);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update task status");
+    } finally {
+      setUpdatingTaskId(null);
+    }
+  }
+
   return (
     <section className="review-workspace">
       <header className="review-workspace-header">
         <div><h1>Review</h1><p>Understand longer-term progress and improve the next cycle.</p></div>
         <div className="review-greeting"><ReviewIcon name="spark" size={32} /><div><strong>Turn your history into better plans.</strong><span>Weekly reflection and monthly patterns now live together.</span></div></div>
-        <Link className="review-coach-button" href="/check-in"><ReviewIcon name="spark" /> Ask my coach <span>⌄</span></Link>
+        <Link className="review-coach-button" href="/coach"><ReviewIcon name="spark" /> Ask my coach <span>⌄</span></Link>
       </header>
 
       {error ? <div className="error review-feedback">{error}</div> : null}
@@ -202,7 +232,7 @@ export default function ReviewPage() {
               <ReviewIcon name="spark" size={15} /> {weeklyReview ? "Regenerate" : "Generate review"}
             </button>
           </div>
-          <div className="weekly-review-board">
+          <div className={`weekly-review-board ${weekDays.length === 5 ? "five-working-days" : ""}`}>
             <aside className="weekly-review-analytics">
               <div className="weekly-review-intro">
                 <h3>What got done</h3>
@@ -217,9 +247,33 @@ export default function ReviewPage() {
                     {weekDays.map((day) => {
                       const completed = day.tasks.filter((task) => task.status === "completed").length;
                       const planned = day.tasks.filter((task) => task.status !== "cancelled").reduce((total, task) => total + (task.estimated_minutes ?? 0), 0);
+                      const dailyAllocation = day.time_allocation.filter((item) => item.focus_minutes > 0);
+                      const dailyAllocationTotal = dailyAllocation.reduce((total, item) => total + item.focus_minutes, 0);
+                      let allocationStart = 0;
+                      const allocationStops = dailyAllocation.map((item) => {
+                        const start = allocationStart;
+                        allocationStart += item.focus_minutes / dailyAllocationTotal * 100;
+                        const color = weeklyColorByLabel.get(item.label) ?? "#a98f86";
+                        return `${color} ${start}% ${allocationStart}%`;
+                      });
+                      const hoverBackground = allocationStops.length
+                        ? `linear-gradient(to top, ${allocationStops.join(", ")})`
+                        : "#6e43e8";
                       return <div className="weekly-productivity-day" key={day.date}>
-                        <div aria-label={`${dateAt(day.date).toLocaleDateString("en", { weekday: "long" })}: ${formatMinutes(day.focus_minutes)} focused`} className="weekly-productivity-bar" style={{ height: `${Math.max(day.focus_minutes / weeklyFocusPeak * 100, day.focus_minutes ? 4 : 0)}%` }} tabIndex={0}>
-                          <span className="weekly-bar-tooltip"><b>{dateAt(day.date).toLocaleDateString("en", { weekday: "short" })}</b><em>{formatMinutes(day.focus_minutes)} focused</em><small>{formatMinutes(planned)} planned · {completed}/{day.tasks.length} done</small></span>
+                        <div aria-label={`${dateAt(day.date).toLocaleDateString("en", { weekday: "long" })}: ${formatMinutes(day.focus_minutes)} focused`} className="weekly-productivity-bar" style={{ height: `${Math.max(day.focus_minutes / weeklyFocusPeak * 100, day.focus_minutes ? 4 : 0)}%`, "--weekly-bar-hover": hoverBackground } as CSSProperties} tabIndex={0}>
+                          <div className="weekly-bar-tooltip">
+                            <header><b>{dateAt(day.date).toLocaleDateString("en", { weekday: "short" })}</b><em>{formatMinutes(day.focus_minutes)} focused</em></header>
+                            <div className="weekly-bar-allocation">
+                              {dailyAllocation.length ? dailyAllocation.map((item) => (
+                                <span key={item.label}>
+                                  <i style={{ background: weeklyColorByLabel.get(item.label) ?? "#a98f86" }} />
+                                  <strong>{item.label}</strong>
+                                  <em>{formatMinutes(item.focus_minutes)}</em>
+                                </span>
+                              )) : <small>No focused time recorded</small>}
+                            </div>
+                            <small>{formatMinutes(planned)} planned · {completed}/{day.tasks.length} done</small>
+                          </div>
                         </div>
                         <small>{dateAt(day.date).toLocaleDateString("en", { weekday: "short" })}</small>
                       </div>;
@@ -244,7 +298,7 @@ export default function ReviewPage() {
               </section>
             </aside>
 
-            <div className="weekly-review-days">
+            <div className={`weekly-review-days days-${weekDays.length} ${weekDays.length <= 5 ? "fit-working-days" : ""}`}>
               {weekDays.map((day) => {
                 const allocationByTitle = new Map(day.time_allocation.map((item) => [item.label, item.focus_minutes]));
                 const planned = day.tasks.filter((task) => task.status !== "cancelled").reduce((total, task) => total + (task.estimated_minutes ?? 0), 0);
@@ -256,7 +310,22 @@ export default function ReviewPage() {
                       const focused = allocationByTitle.get(task.title) ?? 0;
                       return <article className={task.status === "completed" ? "completed" : ""} key={task.id}>
                         <div><strong>{task.title}</strong><small>{formatMinutes(focused)} / {formatMinutes(task.estimated_minutes ?? 0)}</small></div>
-                        <footer><span className={`weekly-task-state ${task.status}`}>{task.status === "completed" ? "✓ Done" : task.status.replace("_", " ")}</span><b className={task.priority}>{task.priority}</b></footer>
+                        <footer>
+                          <div className="weekly-task-status-control">
+                            <span className={`weekly-task-state ${task.status}`}>{task.status === "completed" ? "Done" : task.status.replace("_", " ")}</span>
+                            <button
+                              aria-label={task.status === "completed" ? `Mark ${task.title} as pending` : `Mark ${task.title} as done`}
+                              className={task.status === "completed" ? "weekly-task-toggle completed" : "weekly-task-toggle"}
+                              disabled={updatingTaskId !== null}
+                              onClick={() => void toggleTaskCompletion(task)}
+                              title={task.status === "completed" ? "Mark as pending" : "Mark as done"}
+                              type="button"
+                            >
+                              {updatingTaskId === task.id ? <span className="weekly-task-spinner" /> : <ReviewIcon name="check" size={14} />}
+                            </button>
+                          </div>
+                          <b className={task.priority}>{task.priority}</b>
+                        </footer>
                       </article>;
                     }) : <p>No tasks planned.</p>}
                   </div>

@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 CommandIntent = Literal[
+    "create_task",
     "create_reminder",
     "reschedule_task",
     "reduce_workload",
@@ -12,6 +13,8 @@ CommandIntent = Literal[
     "get_forecast",
     "get_coaching",
     "complete_task",
+    "change_task_duration",
+    "update_content",
     "unknown",
 ]
 

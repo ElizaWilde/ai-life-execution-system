@@ -575,7 +575,7 @@ export default function WeeklyPlanPage() {
         </div>
         <div className="plans-header-actions">
           <Link aria-label="Open calendar" href="/today"><PlanIcon name="calendar" size={20} /></Link>
-          <Link className="plans-coach-button" href="/check-in"><PlanIcon name="spark" /> Ask my coach <span>⌄</span></Link>
+          <Link className="plans-coach-button" href="/coach"><PlanIcon name="spark" /> Ask my coach <span>⌄</span></Link>
         </div>
       </header>
 

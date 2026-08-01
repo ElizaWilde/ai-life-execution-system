@@ -331,7 +331,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!timerHydrated || timer.mode === "focus" || !timer.studySessionId) return;
     const sessionId = timer.studySessionId;
-    void api.finishSession({ session_id: sessionId })
+    void api.finishSession({ session_id: sessionId, duration_seconds: focusDurationSeconds })
       .then(() => {
         setTimer((current) => current.studySessionId === sessionId
           ? { ...current, studySessionId: null }
@@ -341,7 +341,7 @@ export default function DashboardPage() {
       .catch((reason) => {
         setError(reason instanceof Error ? reason.message : "Could not finish the linked study session");
       });
-  }, [timer.mode, timer.studySessionId, timerHydrated]);
+  }, [focusDurationSeconds, timer.mode, timer.studySessionId, timerHydrated]);
 
   useEffect(() => {
     if (!timerHydrated) return;
@@ -477,7 +477,13 @@ export default function DashboardPage() {
     };
     if (synced.studySessionId) {
       try {
-        await api.finishSession({ session_id: synced.studySessionId });
+        const focusedSeconds = synced.mode === "focus"
+          ? Math.max(0, synced.phaseDurationSeconds - synced.remainingSeconds)
+          : focusDurationSeconds;
+        await api.finishSession({
+          session_id: synced.studySessionId,
+          duration_seconds: focusedSeconds,
+        });
         await refreshPlanStats();
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Could not finish the linked study session");
@@ -572,7 +578,7 @@ export default function DashboardPage() {
           <div><strong>Today</strong><span>{currentDate.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}</span></div>
         </div>
         <div className="hero-copy"><h1>Ready for today? <i><Icon name="spark" size={28} /></i></h1><p>Let your AI coach guide the day.</p></div>
-        <Link className="coach-button" href="/check-in"><Icon name="spark" size={18} /> Ask Coach <span>⌄</span></Link>
+        <Link className="coach-button" href="/coach"><Icon name="spark" size={18} /> Ask Coach <span>⌄</span></Link>
       </header>
 
       {error ? <div className="error dashboard-error">{error}</div> : null}

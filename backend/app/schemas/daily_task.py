@@ -39,7 +39,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.coaching import WorkloadLevel
 
 # Literal means the value must be one of the exact values you list.
-Priority = Literal["low", "medium", "high"]
+Priority = Literal["low", "medium", "high", "urgent"]
+TaskChannel = Literal["work", "assignments", "networking", "projects", "study", "personal"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 TaskSource = Literal["manual", "ai", "notion"]
 PlanningScope = Literal["daily", "weekly"]
@@ -55,6 +56,7 @@ class DailyTaskBase(BaseModel):
     # ge=0 and gt=0 are validation constraints(验证约束) in Pydantic Field.
     # ge means greater than or equal to. gt means greater than.
     estimated_minutes: int | None = Field(default=None, ge=0)
+    channel: TaskChannel | None = None
     priority: Priority = "medium"
     weekly_goal_id: int | None = Field(default=None, gt=0)
 
@@ -74,6 +76,7 @@ class DailyTaskUpdate(BaseModel):
     description: str | None = None
     task_date: date | None = None
     estimated_minutes: int | None = Field(default=None, ge=0)
+    channel: TaskChannel | None = None
     priority: Priority | None = None
     status: TaskStatus | None = None
     weekly_goal_id: int | None = Field(default=None, gt=0)

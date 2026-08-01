@@ -110,3 +110,45 @@ def test_start_reclaims_an_abandoned_running_session(client, user_headers):
     if returned_started_at.tzinfo is None:
         returned_started_at = returned_started_at.replace(tzinfo=timezone.utc)
     assert returned_started_at >= restarted_at
+
+
+def test_short_intervals_accumulate_before_rounding(client, user_headers):
+    task = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Short interval task",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 1,
+        },
+    ).json()
+
+    finished_sessions = []
+    for duration_seconds in (35, 35):
+        started = client.post(
+            "/study-sessions/start",
+            headers=user_headers,
+            json={
+                "daily_task_id": task["id"],
+                "subject": "Short focused interval",
+            },
+        ).json()
+        finished = client.post(
+            "/study-sessions/finish",
+            headers=user_headers,
+            json={
+                "session_id": started["id"],
+                "duration_seconds": duration_seconds,
+            },
+        )
+        assert finished.status_code == 200
+        finished_sessions.append(finished.json())
+
+    assert [session["duration_seconds"] for session in finished_sessions] == [35, 35]
+    assert [session["duration_minutes"] for session in finished_sessions] == [0, 0]
+
+    dashboard = client.get("/dashboard/today", headers=user_headers).json()
+    assert dashboard["focus_minutes"] == 1
+
+    completed_task = client.get("/daily-tasks/today", headers=user_headers).json()[0]
+    assert completed_task["status"] == "completed"

@@ -9,13 +9,25 @@ declare const process: {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
-export type Priority = "low" | "medium" | "high";
+export type Priority = "low" | "medium" | "high" | "urgent";
+export type TaskChannel = "work" | "assignments" | "networking" | "projects" | "study" | "personal";
 export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type EnergyLevel = "depleted" | "low" | "steady" | "high" | "energized";
 export type MoodLevel = "struggling" | "low" | "neutral" | "good" | "great";
 export type WorkloadLevel = "light" | "reduced" | "normal";
 export type NotificationChannel = "in_app" | "email" | "telegram";
 export type WorkingDay = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+
+export type CoachChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type CoachChatResponse = {
+  reply: string;
+  model: string;
+  agent: string;
+};
 
 export type UserProfile = {
   id: number;
@@ -149,6 +161,7 @@ export type DailyTask = {
   due_at: string;
   is_overdue: boolean;
   estimated_minutes: number | null;
+  channel: TaskChannel | null;
   priority: Priority;
   weekly_goal_id: number | null;
   status: TaskStatus;
@@ -192,6 +205,7 @@ export type StudySession = {
   started_at: string;
   ended_at: string | null;
   duration_minutes: number | null;
+  duration_seconds: number | null;
   status: "running" | "paused" | "completed" | "cancelled";
   notes: string | null;
   created_at: string;
@@ -312,7 +326,7 @@ export type AutomationCommand = {
   user_id: number;
   idempotency_key: string;
   command_text: string;
-  intent: "create_reminder" | "reschedule_task" | "reduce_workload" | "get_progress" | "get_forecast" | "get_coaching" | "complete_task" | "unknown";
+  intent: "create_task" | "create_reminder" | "reschedule_task" | "reduce_workload" | "get_progress" | "get_forecast" | "get_coaching" | "complete_task" | "change_task_duration" | "update_content" | "unknown";
   parameters_json: Record<string, unknown>;
   status: "pending_confirmation" | "completed" | "rejected" | "failed" | "unknown";
   requires_confirmation: boolean;
@@ -530,6 +544,7 @@ export const api = {
     planning_scope?: "daily" | "weekly";
     due_at?: string | null;
     estimated_minutes?: number | null;
+    channel?: TaskChannel | null;
     priority?: Priority;
     weekly_goal_id?: number | null;
     source?: "manual";
@@ -673,6 +688,7 @@ export const api = {
   finishSession: (body: {
     session_id: number;
     ended_at?: string;
+    duration_seconds?: number;
     notes?: string | null;
   }) => request<StudySession>("/study-sessions/finish", { method: "POST", body }),
   getTodaySessions: () => request<StudySession[]>("/study-sessions/today"),
@@ -693,4 +709,9 @@ export const api = {
     request<WeeklyReview>("/weekly-reviews/current"),
   getWeeklyReview: (weekStart: string) =>
     request<WeeklyReview>(`/weekly-reviews/${weekStart}`),
+  chatWithCoach: (message: string, history: CoachChatMessage[]) =>
+    request<CoachChatResponse>("/coordinator/chat", {
+      method: "POST",
+      body: { message, history },
+    }),
 };

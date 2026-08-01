@@ -61,6 +61,7 @@ def start_study_session(
         running_session.started_at = started_at
         running_session.ended_at = None
         running_session.duration_minutes = None
+        running_session.duration_seconds = None
         running_session.notes = None
         db.commit()
         db.refresh(running_session)
@@ -100,8 +101,14 @@ def finish_study_session(
     if elapsed_seconds < 0:
         raise HTTPException(status_code=422, detail="ended_at precedes started_at")
 
+    focused_seconds = (
+        payload.duration_seconds
+        if payload.duration_seconds is not None
+        else int(elapsed_seconds)
+    )
     session.ended_at = ended_at
-    session.duration_minutes = int(elapsed_seconds // 60)
+    session.duration_seconds = focused_seconds
+    session.duration_minutes = focused_seconds // 60
     session.status = "completed"
     session.notes = payload.notes
     db.flush()
@@ -114,14 +121,24 @@ def finish_study_session(
             )
         )
         if task is not None and task.estimated_minutes is not None and task.estimated_minutes > 0:
-            focused_minutes = db.scalar(
-                select(func.coalesce(func.sum(StudySession.duration_minutes), 0)).where(
+            focused_seconds = db.scalar(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            func.coalesce(
+                                StudySession.duration_seconds,
+                                StudySession.duration_minutes * 60,
+                            )
+                        ),
+                        0,
+                    )
+                ).where(
                     StudySession.daily_task_id == task.id,
                     StudySession.user_id == user.id,
                     StudySession.status == "completed",
                 )
             )
-            if focused_minutes >= task.estimated_minutes:
+            if focused_seconds >= task.estimated_minutes * 60:
                 task.status = "completed"
                 task.completed_at = ended_at
 

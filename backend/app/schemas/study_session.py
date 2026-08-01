@@ -16,6 +16,7 @@ class StudySessionStart(BaseModel):
 class StudySessionFinish(BaseModel):
     session_id: int = Field(gt=0)
     ended_at: datetime | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)
     notes: str | None = None
 
 
@@ -29,6 +30,7 @@ class StudySessionRead(BaseModel):
     started_at: datetime
     ended_at: datetime | None
     duration_minutes: int | None = Field(ge=0)
+    duration_seconds: int | None = Field(ge=0)
     status: SessionStatus
     notes: str | None
     created_at: datetime

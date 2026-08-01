@@ -17,6 +17,10 @@ class AutomationAction(str, Enum):
     REDUCE_WEEKLY_GOAL = "reduce_weekly_goal"
     UPDATE_NOTION_TASKS = "update_notion_tasks"
     COMPLETE_TASK = "complete_task"
+    CREATE_TASK = "create_task"
+    UPDATE_TASK_DETAILS = "update_task_details"
+    UPDATE_WEEKLY_GOAL_DETAILS = "update_weekly_goal_details"
+    UPDATE_PHASE_DETAILS = "update_phase_details"
 
     DELETE_TASKS = "delete_tasks"
     CANCEL_GOALS = "cancel_goals"
@@ -107,6 +111,26 @@ AUTOMATION_RULES: dict[AutomationAction, AutomationRule] = {
         AutomationAction.COMPLETE_TASK,
         AutomationLevel.REQUIRES_CONFIRMATION,
         "Complete a task only after the user confirms the matched task.",
+    ),
+    AutomationAction.CREATE_TASK: AutomationRule(
+        AutomationAction.CREATE_TASK,
+        AutomationLevel.REQUIRES_CONFIRMATION,
+        "Add a task to the user's plan only after user confirmation.",
+    ),
+    AutomationAction.UPDATE_TASK_DETAILS: AutomationRule(
+        AutomationAction.UPDATE_TASK_DETAILS,
+        AutomationLevel.REQUIRES_CONFIRMATION,
+        "Update task details only after user confirmation.",
+    ),
+    AutomationAction.UPDATE_WEEKLY_GOAL_DETAILS: AutomationRule(
+        AutomationAction.UPDATE_WEEKLY_GOAL_DETAILS,
+        AutomationLevel.REQUIRES_CONFIRMATION,
+        "Update a weekly priority only after user confirmation.",
+    ),
+    AutomationAction.UPDATE_PHASE_DETAILS: AutomationRule(
+        AutomationAction.UPDATE_PHASE_DETAILS,
+        AutomationLevel.REQUIRES_CONFIRMATION,
+        "Update a phase or milestone only after user confirmation.",
     ),
     AutomationAction.DELETE_TASKS: AutomationRule(
         AutomationAction.DELETE_TASKS,

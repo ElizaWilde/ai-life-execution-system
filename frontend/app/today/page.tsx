@@ -10,7 +10,9 @@ import {
   EnergyLevel,
   MoodLevel,
   Priority,
+  TaskChannel,
   TodayDashboard,
+  WeeklyGoal,
 } from "../../lib/api";
 import { useAppSettings, workloadMinutes } from "../../lib/settings";
 import { announceCheckInUpdate, subscribeToCheckInUpdates } from "../../lib/check-in-sync";
@@ -60,6 +62,15 @@ function formatHours(minutes: number) {
 }
 
 const sleepHourOptions = Array.from({ length: 19 }, (_, index) => 3 + index / 2);
+const TASK_TIME_OPTIONS = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120, 180];
+const TASK_CHANNELS: { value: TaskChannel; label: string }[] = [
+  { value: "work", label: "Work" },
+  { value: "assignments", label: "Assignments" },
+  { value: "networking", label: "Networking" },
+  { value: "projects", label: "Projects" },
+  { value: "study", label: "Study" },
+  { value: "personal", label: "Personal" },
+];
 
 function sleepHourLabel(value: number) {
   const hours = Math.floor(value);
@@ -74,6 +85,7 @@ export default function TodayPage() {
   const today = localToday();
   const tomorrow = addLocalDays(today, 1);
   const [tasks, setTasks] = useState<DailyTask[]>([]);
+  const [weeklyGoals, setWeeklyGoals] = useState<WeeklyGoal[]>([]);
   const [dashboard, setDashboard] = useState<TodayDashboard | null>(null);
   const [previewDate, setPreviewDate] = useState(today);
   const [dailyPreviews, setDailyPreviews] = useState<Record<string, DailyPlanPreview | null>>({});
@@ -95,7 +107,10 @@ export default function TodayPage() {
   const [planAction, setPlanAction] = useState<"build" | "refine" | "confirm" | null>(null);
 
   const [title, setTitle] = useState("");
-  const [taskHours, setTaskHours] = useState("0.5");
+  const [description, setDescription] = useState("");
+  const [taskMinutes, setTaskMinutes] = useState("30");
+  const [taskChannel, setTaskChannel] = useState<TaskChannel | "">("");
+  const [selectedGoalId, setSelectedGoalId] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [availableMinutes, setAvailableMinutes] = useState("360");
   const [energy, setEnergy] = useState<EnergyLevel>("steady");
@@ -108,13 +123,15 @@ export default function TodayPage() {
   async function loadToday() {
     setError("");
     try {
-      const [taskData, dashboardData, todayPreview, tomorrowPreview] = await Promise.all([
+      const [taskData, dashboardData, todayPreview, tomorrowPreview, goalData] = await Promise.all([
         api.getTodayTasks(),
         api.getTodayDashboard(),
         api.getLatestDailyPlanPreview(today),
         api.getLatestDailyPlanPreview(tomorrow),
+        api.getCurrentGoals(),
       ]);
       setTasks(taskData);
+      setWeeklyGoals(goalData.filter((goal) => goal.status === "active"));
       setDashboard(dashboardData);
       setDailyPreviews({ [today]: todayPreview, [tomorrow]: tomorrowPreview });
       if (dashboardData.check_in) {
@@ -163,7 +180,10 @@ export default function TodayPage() {
     try {
       const taskData = {
         title,
-        estimated_minutes: taskHours ? Math.round(Number(taskHours) * 60) : null,
+        description: description.trim() || null,
+        estimated_minutes: taskMinutes ? Number(taskMinutes) : null,
+        channel: taskChannel || null,
+        weekly_goal_id: selectedGoalId ? Number(selectedGoalId) : null,
         priority,
       };
       if (editingTaskId) {
@@ -174,7 +194,10 @@ export default function TodayPage() {
         setMessage("Task added.");
       }
       setTitle("");
-      setTaskHours("0.5");
+      setDescription("");
+      setTaskMinutes("30");
+      setTaskChannel("");
+      setSelectedGoalId("");
       setPriority("medium");
       setEditingTaskId(null);
       setEditingTaskDate(null);
@@ -243,7 +266,10 @@ export default function TodayPage() {
     setEditingTaskId(task.id);
     setEditingTaskDate(task.task_date);
     setTitle(task.title);
-    setTaskHours(task.estimated_minutes ? String(task.estimated_minutes / 60) : "0.5");
+    setDescription(task.description ?? "");
+    setTaskMinutes(task.estimated_minutes ? String(task.estimated_minutes) : "30");
+    setTaskChannel(task.channel ?? "");
+    setSelectedGoalId(task.weekly_goal_id ? String(task.weekly_goal_id) : "");
     setPriority(task.priority);
     setShowAddTask(true);
   }
@@ -251,7 +277,10 @@ export default function TodayPage() {
   function cancelTaskForm() {
     setEditingTaskId(null);
     setTitle("");
-    setTaskHours("0.5");
+    setDescription("");
+    setTaskMinutes("30");
+    setTaskChannel("");
+    setSelectedGoalId("");
     setPriority("medium");
     setShowAddTask(false);
     setEditingTaskDate(null);
@@ -392,6 +421,58 @@ export default function TodayPage() {
     void generatePlan(previewDate, planInstruction);
   }
 
+  function renderTaskForm(submitLabel: string) {
+    return (
+      <form className="today-add-form" onSubmit={createTask}>
+        <div className="today-task-core-fields">
+          <label>
+            <span>Task</span>
+            <input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} />
+          </label>
+          <label>
+            <span>Description</span>
+            <input className="input" placeholder="Add helpful details or a clear next step" value={description} onChange={(event) => setDescription(event.target.value)} />
+          </label>
+        </div>
+        <div className="today-task-metadata">
+          <label>
+            <span><TodayIcon name="clock" size={14} /> Planned time</span>
+            <select aria-label="Planned time" className="input" value={taskMinutes} onChange={(event) => setTaskMinutes(event.target.value)}>
+              {TASK_TIME_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{formatMinutes(minutes)}</option>)}
+            </select>
+          </label>
+          <label>
+            <span><b className="today-form-hash">#</b> Channel</span>
+            <select aria-label="Assign to channel" className="input" value={taskChannel} onChange={(event) => setTaskChannel(event.target.value as TaskChannel | "")}>
+              <option value="">Unassigned</option>
+              {TASK_CHANNELS.map((channel) => <option key={channel.value} value={channel.value}>{channel.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span><TodayIcon name="target" size={14} /> Objective</span>
+            <select aria-label="Align with objective" className="input" value={selectedGoalId} onChange={(event) => setSelectedGoalId(event.target.value)}>
+              <option value="">Unassigned</option>
+              {weeklyGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}
+            </select>
+          </label>
+          <label>
+            <span><TodayIcon name="chart" size={14} /> Daily priority</span>
+            <select aria-label="Daily priority" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>
+              <option value="urgent">Urgent</option>
+              <option value="high">Priority</option>
+              <option value="medium">Normal</option>
+              <option value="low">Low Priority</option>
+            </select>
+          </label>
+        </div>
+        <div className="today-task-form-actions">
+          <button className="today-primary-button" disabled={busy} type="submit">{submitLabel}</button>
+          <button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button>
+        </div>
+      </form>
+    );
+  }
+
   const date = new Date(`${today}T00:00:00`);
 
   return (
@@ -399,7 +480,7 @@ export default function TodayPage() {
       <header className="today-workspace-header">
         <div><h1>Today</h1><p>{date.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} <span>⌄</span></p></div>
         <div className="today-greeting"><TodayIcon name="spark" size={34} /><div><strong>Hey, ready to make today count?</strong><span>Plan your day, check in with yourself, and let’s get things done.</span></div></div>
-        <Link className="today-coach-button" href="/check-in"><TodayIcon name="spark" /> Ask my coach <span>⌄</span></Link>
+        <Link className="today-coach-button" href="/coach"><TodayIcon name="spark" /> Ask my coach <span>⌄</span></Link>
       </header>
 
       {error ? <div className="error today-feedback">{error}</div> : null}
@@ -459,7 +540,7 @@ export default function TodayPage() {
                     </div>
                   </article>
                 ))}
-                {showAddTask && editingTaskId && editingTaskDate === comparisonDate ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">Save changes</button><button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button></form> : null}
+                {showAddTask && editingTaskId && editingTaskDate === comparisonDate ? renderTaskForm("Save changes") : null}
               </div>
             </section>
           ) : null}
@@ -493,7 +574,7 @@ export default function TodayPage() {
                   <button aria-label={`Delete ${task.title}`} className="priority-delete-button" disabled={busy} onClick={() => deleteTask(task)} title="Delete task" type="button"><TodayIcon name="trash" size={17} /></button>
                 </div>
               </article>)}
-              {showAddTask && (!editingTaskId || editingTaskDate === today) ? <form className="today-add-form" onSubmit={createTask}><input className="input" placeholder="What needs to get done?" required value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label="Estimated hours" className="input" min="0.25" placeholder="Hours" step="0.25" type="number" value={taskHours} onChange={(event) => setTaskHours(event.target.value)} /><select aria-label="Priority level" className="input" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><button className="today-primary-button" disabled={busy} type="submit">{editingTaskId ? "Save changes" : "Add task"}</button><button className="today-add-cancel" onClick={cancelTaskForm} type="button">Cancel</button></form> : null}
+              {showAddTask && (!editingTaskId || editingTaskDate === today) ? renderTaskForm(editingTaskId ? "Save changes" : "Add task") : null}
               {!showAddTask ? <button className="today-add-bottom" onClick={() => { setEditingTaskId(null); setEditingTaskDate(today); setShowAddTask(true); }} type="button">＋ Add Task</button> : null}
             </div>
           </section>

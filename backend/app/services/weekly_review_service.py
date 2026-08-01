@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import DailyCheckIn, DailyTask, StudySession, WeeklyReview
+from app.services.study_session_duration import total_focused_minutes
 from app.prompts.weekly_review_prompt import (
     WEEKLY_REVIEW_PROMPT_VERSION,
     WEEKLY_REVIEW_SYSTEM_PROMPT,
@@ -146,7 +147,7 @@ class WeeklyReviewService:
             completed_tasks=len(completed_tasks),
             unfinished_tasks=len(unfinished_tasks),
             completion_rate=(len(completed_tasks) / len(tasks) if tasks else 0.0),
-            focus_minutes=sum(session.duration_minutes or 0 for session in sessions),
+            focus_minutes=total_focused_minutes(sessions),
             check_in_days=len(check_ins),
             average_sleep_hours=average_sleep,
             energy_distribution=dict(

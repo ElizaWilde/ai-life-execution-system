@@ -341,7 +341,7 @@ export default function SettingsPage() {
 
   return (
     <section className="settings-workspace">
-      <header className="settings-header"><div><h1>Settings</h1><p>Customize your experience and AI coach to fit your goals.</p></div><div><Link aria-label="Open calendar" href="/today"><SettingIcon name="calendar" /></Link><Link className="settings-coach-button" href="/check-in"><SettingIcon name="spark" /> Ask my coach <span>⌄</span></Link></div></header>
+      <header className="settings-header"><div><h1>Settings</h1><p>Customize your experience and AI coach to fit your goals.</p></div><div><Link aria-label="Open calendar" href="/today"><SettingIcon name="calendar" /></Link><Link className="settings-coach-button" href="/coach"><SettingIcon name="spark" /> Ask my coach <span>⌄</span></Link></div></header>
       {message ? <div className="settings-message">{message}<button onClick={() => setMessage("")} type="button">×</button></div> : null}
 
       <div className="settings-layout">

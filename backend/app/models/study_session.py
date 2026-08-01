@@ -34,6 +34,7 @@ class StudySession(Base):
     )
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_minutes: Mapped[int | None]
+    duration_seconds: Mapped[int | None]
     status: Mapped[str] = mapped_column(String(20), default="running", index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
