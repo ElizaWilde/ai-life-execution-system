@@ -1863,32 +1863,66 @@ body {
   border: 1px solid rgba(117, 73, 237, .14);
   border-radius: 18px;
   display: block;
-  height: 174px;
+  height: 196px;
   margin-top: auto;
   overflow: hidden;
   position: relative;
   transition: background .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 
-.sidebar-coach canvas {
-  display: block;
+.coach-character-2d {
   height: 100%;
-  touch-action: none;
-  transition: filter .25s ease, transform .25s ease;
+  overflow: hidden;
+  position: relative;
   width: 100%;
 }
 
-.coach-character-fallback {
-  align-items: center;
-  color: #6d43e8;
-  display: flex;
-  font-size: 58px;
-  inset: 0;
-  justify-content: center;
+.coach-character-sprite {
+  animation: coach-character-float 3.2s ease-in-out infinite;
+  background-image: url("/characters/ai-coach-idle-strip.png");
+  background-position: 0 center;
+  background-repeat: no-repeat;
+  background-size: 400% 100%;
+  bottom: 7px;
+  height: 168px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  transition: background-position 80ms steps(1), filter .2s ease;
+  width: 112px;
+}
+
+.coach-character-speech {
+  background: rgba(255, 255, 255, .92);
+  border: 1px solid rgba(74, 52, 97, .2);
+  border-radius: 13px;
+  box-shadow: 0 5px 14px rgba(45, 27, 70, .1);
+  color: #3f3150;
+  font-size: 11px;
+  left: 10px;
+  line-height: 1;
+  padding: 7px 9px;
+  position: absolute;
+  top: 9px;
+  z-index: 2;
+}
+
+.coach-character-speech::after {
+  border-left: 6px solid transparent;
+  border-right: 2px solid transparent;
+  border-top: 7px solid rgba(255, 255, 255, .92);
+  bottom: -6px;
+  content: "";
+  left: 20px;
   position: absolute;
 }
 
-.sidebar-coach span {
+@keyframes coach-character-float {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(-.4deg); }
+  50% { transform: translateX(-50%) translateY(-5px) rotate(.4deg); }
+}
+
+.sidebar-coach-cta {
   align-items: center;
   backdrop-filter: blur(8px);
   background: rgba(39, 22, 65, .76);
@@ -1905,7 +1939,7 @@ body {
   white-space: nowrap;
 }
 
-.sidebar-coach span svg {
+.sidebar-coach-cta svg {
   height: 14px;
   stroke: currentColor;
   stroke-linecap: round;
@@ -1919,9 +1953,8 @@ body {
   transform: translateY(-2px);
 }
 
-.sidebar-coach:hover canvas {
+.sidebar-coach:hover .coach-character-sprite {
   filter: saturate(1.08) brightness(1.03);
-  transform: scale(1.035);
 }
 
 .sidebar-user {

@@ -11,15 +11,13 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "recharts": "latest",
-    "three": "^0.185.1"
+    "recharts": "latest"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.2",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/three": "0.185.1",
     "autoprefixer": "latest",
     "postcss": "latest",
     "tailwindcss": "latest",
