@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import DailyCheckIn, DailyTask, StudySession, WeeklyReview
-from app.services.study_session_duration import total_focused_minutes
+from app.services.study_session_duration import (
+    is_counted_focus_session,
+    total_focused_minutes,
+)
 from app.prompts.weekly_review_prompt import (
     WEEKLY_REVIEW_PROMPT_VERSION,
     WEEKLY_REVIEW_SYSTEM_PROMPT,
@@ -140,6 +143,10 @@ class WeeklyReviewService:
             else None
         )
 
+        counted_sessions = [
+            session for session in sessions if is_counted_focus_session(session)
+        ]
+
         return WeeklyReviewContext(
             week_start=week_start,
             week_end=week_end,
@@ -147,7 +154,7 @@ class WeeklyReviewService:
             completed_tasks=len(completed_tasks),
             unfinished_tasks=len(unfinished_tasks),
             completion_rate=(len(completed_tasks) / len(tasks) if tasks else 0.0),
-            focus_minutes=total_focused_minutes(sessions),
+            focus_minutes=total_focused_minutes(counted_sessions),
             check_in_days=len(check_ins),
             average_sleep_hours=average_sleep,
             energy_distribution=dict(
@@ -156,7 +163,7 @@ class WeeklyReviewService:
             mood_distribution=dict(Counter(item.mood_level for item in check_ins)),
             completed_task_titles=[task.title for task in completed_tasks],
             unfinished_task_titles=[task.title for task in unfinished_tasks],
-            study_subjects=[session.subject for session in sessions],
+            study_subjects=[session.subject for session in counted_sessions],
             check_in_notes=[item.notes for item in check_ins if item.notes],
         )
 

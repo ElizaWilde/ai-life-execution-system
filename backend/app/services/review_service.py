@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 from app.models import DailyReview, DailyTask, StudySession
 from app.schemas.review import DailyReviewRead
 from app.services.llm_service import llm_service
+from app.services.study_session_duration import (
+    is_counted_focus_session,
+    total_focused_minutes,
+)
 
 
 class ReviewService:
@@ -26,7 +30,10 @@ class ReviewService:
             task for task in planned_tasks if task.status == "completed"
         ]
         study_sessions = self._get_study_sessions(db, user_id, target_date)
-        focus_minutes = sum(session.duration_minutes or 0 for session in study_sessions)
+        study_sessions = [
+            session for session in study_sessions if is_counted_focus_session(session)
+        ]
+        focus_minutes = total_focused_minutes(study_sessions)
 
         summary = await llm_service.generate_daily_review(
             planned_tasks=[self._task_to_prompt(task) for task in planned_tasks],

@@ -112,7 +112,7 @@ def test_start_reclaims_an_abandoned_running_session(client, user_headers):
     assert returned_started_at >= restarted_at
 
 
-def test_short_intervals_accumulate_before_rounding(client, user_headers):
+def test_sessions_under_three_minutes_are_excluded_from_statistics(client, user_headers):
     task = client.post(
         "/daily-tasks",
         headers=user_headers,
@@ -148,7 +148,32 @@ def test_short_intervals_accumulate_before_rounding(client, user_headers):
     assert [session["duration_minutes"] for session in finished_sessions] == [0, 0]
 
     dashboard = client.get("/dashboard/today", headers=user_headers).json()
-    assert dashboard["focus_minutes"] == 1
+    assert dashboard["focus_minutes"] == 0
+
+    today_sessions = client.get("/study-sessions/today", headers=user_headers).json()
+    assert today_sessions == []
 
     completed_task = client.get("/daily-tasks/today", headers=user_headers).json()[0]
-    assert completed_task["status"] == "completed"
+    assert completed_task["status"] == "pending"
+
+
+def test_three_minute_session_is_included_in_statistics_and_today_list(
+    client, user_headers
+):
+    started = client.post(
+        "/study-sessions/start",
+        headers=user_headers,
+        json={"subject": "Counted focus session"},
+    ).json()
+    finished = client.post(
+        "/study-sessions/finish",
+        headers=user_headers,
+        json={"session_id": started["id"], "duration_seconds": 180},
+    )
+
+    assert finished.status_code == 200
+    assert client.get("/dashboard/today", headers=user_headers).json()[
+        "focus_minutes"
+    ] == 3
+    today_sessions = client.get("/study-sessions/today", headers=user_headers).json()
+    assert [session["id"] for session in today_sessions] == [started["id"]]

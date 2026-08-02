@@ -25,6 +25,7 @@ from app.services.overdue_detection_service import (
     OverdueTaskFinding,
     overdue_detection_service,
 )
+from app.services.study_session_duration import counted_focus_session_clause
 from app.services.task_deadline_service import task_deadline_service
 
 
@@ -386,6 +387,7 @@ class ReschedulingProposalService:
                     StudySession.user_id == user_id,
                     StudySession.status == "completed",
                     StudySession.started_at >= history_start,
+                    counted_focus_session_clause(),
                 )
             )
             or 0

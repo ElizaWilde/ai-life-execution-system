@@ -2,7 +2,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
@@ -12,6 +12,7 @@ from app.schemas.study_session import (
     StudySessionRead,
     StudySessionStart,
 )
+from app.services.study_session_duration import counted_focus_session_clause
 
 
 router = APIRouter()
@@ -136,6 +137,7 @@ def finish_study_session(
                     StudySession.daily_task_id == task.id,
                     StudySession.user_id == user.id,
                     StudySession.status == "completed",
+                    counted_focus_session_clause(),
                 )
             )
             if focused_seconds >= task.estimated_minutes * 60:
@@ -163,6 +165,10 @@ def get_today_sessions(
                 StudySession.user_id == user.id,
                 StudySession.started_at >= today_start,
                 StudySession.started_at < tomorrow_start,
+                or_(
+                    StudySession.status == "running",
+                    counted_focus_session_clause(),
+                ),
             )
             .order_by(StudySession.started_at)
         )

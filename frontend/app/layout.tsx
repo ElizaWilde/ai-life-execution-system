@@ -7,6 +7,7 @@ import "../styles/globals.css";
  */
 import Sidebar from "../components/layout/Sidebar";
 import SettingsSync from "../components/layout/SettingsSync";
+import CoachCharacter2D from "../components/layout/CoachCharacter2D";
 /**
  * ReactNode is a TS type that represents any valid React child, including elements, strings, numbers, fragments, portals, and arrays of these types. 
  * React documents ReactNode as the union of the possible types that can be passed as JSX children.
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {/* Render the current page content inside the <main> area. */}
           <main className="main-content">{children}</main>
         </div>
+        <CoachCharacter2D />
       </body>
     </html>
   );

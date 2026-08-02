@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import DailyTask, StudySession
+from app.services.study_session_duration import counted_focus_session_clause
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class EstimationCalibrationService:
                 StudySession.user_id == user_id,
                 StudySession.status == "completed",
                 StudySession.duration_minutes.is_not(None),
+                counted_focus_session_clause(),
             )
             .group_by(DailyTask.id, DailyTask.estimated_minutes)
             .order_by(DailyTask.id.desc())

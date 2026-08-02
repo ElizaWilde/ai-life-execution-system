@@ -8,6 +8,8 @@ def test_get_app_settings_creates_defaults(client, user_headers):
     assert data["cycle_count"] == 4
     assert data["theme"] == "light"
     assert data["proactive"] is True
+    assert data["coach_roaming_enabled"] is True
+    assert data["coach_move_interval_seconds"] == 30
     assert data["integrations"] == []
     assert data["avatar_data_url"] is None
 
@@ -28,6 +30,8 @@ def test_update_app_settings_persists_full_page_preferences(client, user_headers
         "focus_matters": False,
         "protect_deep_work": False,
         "learn_from_feedback": False,
+        "coach_roaming_enabled": False,
+        "coach_move_interval_seconds": 60,
         "integrations": ["Notion", "Gmail"],
         "avatar_data_url": "data:image/png;base64,dGVzdA==",
     }

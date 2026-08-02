@@ -33,6 +33,10 @@ class UserAppSetting(Base):
         CheckConstraint("tone IN ('supportive', 'direct', 'reflective')", name="ck_user_app_settings_tone"),
         CheckConstraint("strictness IN ('flexible', 'balanced', 'strict')", name="ck_user_app_settings_strictness"),
         CheckConstraint("adjustment IN ('gentle', 'moderate', 'strong')", name="ck_user_app_settings_adjustment"),
+        CheckConstraint(
+            "coach_move_interval_seconds IN (15, 30, 60, 120)",
+            name="ck_user_app_settings_coach_move_interval",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -54,6 +58,8 @@ class UserAppSetting(Base):
     focus_matters: Mapped[bool] = mapped_column(Boolean, default=True)
     protect_deep_work: Mapped[bool] = mapped_column(Boolean, default=True)
     learn_from_feedback: Mapped[bool] = mapped_column(Boolean, default=True)
+    coach_roaming_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    coach_move_interval_seconds: Mapped[int] = mapped_column(Integer, default=30)
     integrations_json: Mapped[list[str]] = mapped_column(JSON, default=list)
     avatar_data_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DailyCheckIn, DailyTask, StudySession
 from app.schemas.coaching import CoachingContext
+from app.services.study_session_duration import total_focused_minutes
 
 
 UNFINISHED_TASK_STATUSES = {"pending", "in_progress"}
@@ -132,7 +133,7 @@ class CoachingContextService:
                 StudySession.started_at < end,
             )
         )
-        return sum(session.duration_minutes or 0 for session in sessions)
+        return total_focused_minutes(sessions)
 
     @staticmethod
     def _completion_rate(completed_tasks: int, planned_tasks: int) -> float:

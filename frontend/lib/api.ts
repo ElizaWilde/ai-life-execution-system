@@ -54,6 +54,8 @@ export type UserAppSettings = {
   focus_matters: boolean;
   protect_deep_work: boolean;
   learn_from_feedback: boolean;
+  coach_roaming_enabled: boolean;
+  coach_move_interval_seconds: 15 | 30 | 60 | 120;
   integrations: ("Google Calendar" | "Notion" | "Telegram" | "Gmail")[];
   avatar_data_url: string | null;
   created_at: string;

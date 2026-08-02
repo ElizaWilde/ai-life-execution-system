@@ -30,6 +30,8 @@ def _to_read(setting: UserAppSetting) -> UserAppSettingRead:
         focus_matters=setting.focus_matters,
         protect_deep_work=setting.protect_deep_work,
         learn_from_feedback=setting.learn_from_feedback,
+        coach_roaming_enabled=setting.coach_roaming_enabled,
+        coach_move_interval_seconds=setting.coach_move_interval_seconds,
         integrations=setting.integrations_json,
         avatar_data_url=setting.avatar_data_url,
         created_at=setting.created_at,

@@ -22,6 +22,8 @@ class UserAppSettingFields(BaseModel):
     focus_matters: bool = True
     protect_deep_work: bool = True
     learn_from_feedback: bool = True
+    coach_roaming_enabled: bool = True
+    coach_move_interval_seconds: Literal[15, 30, 60, 120] = 30
     integrations: list[Integration] = Field(default_factory=list, max_length=4)
     avatar_data_url: str | None = Field(default=None, max_length=2_000_000)
 

@@ -18,6 +18,8 @@ export type AppSettings = {
   focusMatters: boolean;
   protectDeepWork: boolean;
   learnFromFeedback: boolean;
+  coachRoamingEnabled: boolean;
+  coachMoveIntervalSeconds: 15 | 30 | 60 | 120;
   integrations: string[];
 };
 
@@ -42,6 +44,8 @@ export const defaultSettings: AppSettings = {
   focusMatters: true,
   protectDeepWork: true,
   learnFromFeedback: true,
+  coachRoamingEnabled: true,
+  coachMoveIntervalSeconds: 30,
   integrations: [],
 };
 

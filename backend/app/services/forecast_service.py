@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DailyTask, ForecastHistory, StudySession, WeeklyGoal
 from app.services.automation_audit_service import automation_audit_service
+from app.services.study_session_duration import counted_focus_session_clause
 
 
 class ForecastService:
@@ -192,6 +193,7 @@ class ForecastService:
                     StudySession.started_at >= start,
                     StudySession.started_at < end,
                     DailyTask.weekly_goal_id == goal.id,
+                    counted_focus_session_clause(),
                 )
             )
             or 0

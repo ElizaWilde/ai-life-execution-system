@@ -1877,19 +1877,34 @@ body {
   width: 100%;
 }
 
-.coach-character-sprite {
+.coach-character-motion {
   animation: coach-character-float 3.2s ease-in-out infinite;
-  background-image: url("/characters/ai-coach-idle-strip.png");
-  background-position: 0 center;
-  background-repeat: no-repeat;
-  background-size: 400% 100%;
   bottom: 7px;
   height: 168px;
   left: 50%;
   position: absolute;
   transform: translateX(-50%);
-  transition: background-position 80ms steps(1), filter .2s ease;
   width: 112px;
+}
+
+.coach-character-sprite {
+  --coach-gaze-x: 0;
+  --coach-gaze-y: 0;
+  background-image: url("/characters/ai-coach-idle-strip.png");
+  background-position: 0 center;
+  background-repeat: no-repeat;
+  background-size: 400% 100%;
+  display: block;
+  height: 100%;
+  transform: translate3d(
+    calc(var(--coach-gaze-x) * 6px),
+    calc(var(--coach-gaze-y) * 4px),
+    0
+  ) rotate(calc(var(--coach-gaze-x) * 2.4deg));
+  transform-origin: 50% 72%;
+  transition: background-position 80ms steps(1), filter .2s ease;
+  width: 100%;
+  will-change: transform;
 }
 
 .coach-character-speech {
@@ -1957,12 +1972,22 @@ body {
   filter: saturate(1.08) brightness(1.03);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .coach-character-motion {
+    animation: none;
+  }
+
+  .coach-character-sprite {
+    transform: none;
+  }
+}
+
 .sidebar-user {
   align-items: center;
   display: grid;
   gap: 10px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  margin-top: 12px;
+  margin-top: auto;
   padding: 16px 10px 0;
 }
 
@@ -2009,6 +2034,121 @@ body {
   grid-column: 2;
   min-width: 0;
   padding: 18px 20px 22px;
+}
+
+/* Page-level AI companion: intentionally has no containing card. */
+.floating-coach {
+  cursor: grab;
+  display: block;
+  height: 220px;
+  position: fixed;
+  transition: left 1.65s cubic-bezier(.22, .75, .2, 1), top 1.65s cubic-bezier(.22, .75, .2, 1), filter .2s ease, transform .2s ease;
+  touch-action: none;
+  user-select: none;
+  width: 154px;
+  z-index: 80;
+}
+
+.floating-coach-sprite {
+  animation: floating-coach-idle 3.2s ease-in-out infinite;
+  background-image: url("/characters/ai-coach-direction-strip-clean.png");
+  background-position: 0 center;
+  background-repeat: no-repeat;
+  background-size: 800% auto;
+  display: block;
+  filter: drop-shadow(0 9px 7px rgba(35, 18, 40, .23)) drop-shadow(0 2px 2px rgba(45, 15, 25, .22));
+  height: 100%;
+  transition: background-position 90ms steps(1);
+  width: 100%;
+}
+
+.floating-coach::after {
+  background: radial-gradient(ellipse, rgba(45, 26, 52, .24), rgba(45, 26, 52, 0) 70%);
+  bottom: -1px;
+  content: "";
+  height: 15px;
+  left: 23%;
+  pointer-events: none;
+  position: absolute;
+  width: 54%;
+  z-index: -1;
+}
+
+.floating-coach-speech {
+  background: rgba(255, 255, 255, .94);
+  border: 1px solid rgba(74, 52, 97, .2);
+  border-radius: 13px;
+  box-shadow: 0 5px 14px rgba(45, 27, 70, .1);
+  color: #3f3150;
+  font-size: 12px;
+  left: 50%;
+  line-height: 1;
+  opacity: 0;
+  padding: 8px 10px;
+  position: absolute;
+  top: -4px;
+  transform: translate(-50%, -5px);
+  transition: opacity .18s ease, transform .18s ease;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.floating-coach-speech::after {
+  border-left: 6px solid transparent;
+  border-right: 2px solid transparent;
+  border-top: 7px solid rgba(255, 255, 255, .94);
+  bottom: -6px;
+  content: "";
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.floating-coach:hover {
+  filter: saturate(1.08) brightness(1.03);
+  transform: translateY(-3px);
+}
+
+.floating-coach.dragging {
+  cursor: grabbing;
+  filter: saturate(1.1) brightness(1.04);
+  transform: scale(1.025);
+  transition: filter .15s ease, transform .15s ease;
+}
+
+.floating-coach.dragging .floating-coach-sprite {
+  animation-play-state: paused;
+}
+
+/* Automatic roaming is disabled; the floating coach is positioned by dragging. */
+#ai-coach .coach-settings-grid > label:nth-child(5),
+#ai-coach .coach-settings-grid > label:nth-child(6) {
+  display: none;
+}
+
+.floating-coach:hover .floating-coach-speech {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@keyframes floating-coach-idle {
+  0%, 100% { transform: translateY(0) rotate(-.35deg); }
+  50% { transform: translateY(-5px) rotate(.35deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-coach,
+  .floating-coach-sprite {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .floating-coach {
+    height: 170px;
+    width: 119px;
+  }
 }
 
 .life-dashboard {

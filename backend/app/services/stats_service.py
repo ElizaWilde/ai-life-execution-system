@@ -12,7 +12,11 @@ from app.models import (
     StudySession,
     WeeklyGoal,
 )
-from app.services.study_session_duration import focused_seconds, total_focused_minutes
+from app.services.study_session_duration import (
+    focused_seconds,
+    is_counted_focus_session,
+    total_focused_minutes,
+)
 from app.schemas.coaching import (
     CoachingRecommendationRead,
     CoachingRecommendationResponse,
@@ -179,7 +183,7 @@ class StatsService:
         start: datetime,
         end: datetime,
     ) -> list[StudySession]:
-        return list(
+        sessions = list(
             db.scalars(
                 select(StudySession).where(
                     StudySession.user_id == user_id,
@@ -189,6 +193,7 @@ class StatsService:
                 )
             )
         )
+        return [session for session in sessions if is_counted_focus_session(session)]
 
     @staticmethod
     def _time_allocation(

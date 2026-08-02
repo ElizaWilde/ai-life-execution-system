@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import AutomationPreference, DailyTask, PlanPreview, StudySession, WeeklyGoal
 from app.services.estimation_calibration_service import estimation_calibration_service
 from app.services.planning_service import MissingActiveWeeklyGoalError, planning_service
+from app.services.study_session_duration import counted_focus_session_clause
 from app.services.task_deadline_service import task_deadline_service
 
 
@@ -137,6 +138,7 @@ class PlanPreviewService:
                     >= datetime.combine(history_start, time.min, tzinfo=timezone.utc),
                     StudySession.started_at
                     < datetime.combine(week_start, time.min, tzinfo=timezone.utc),
+                    counted_focus_session_clause(),
                 )
             )
             or 0
