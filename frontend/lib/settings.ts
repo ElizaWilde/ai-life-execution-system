@@ -9,6 +9,9 @@ export type AppSettings = {
   shortBreak: string;
   longBreak: string;
   cycleCount: string;
+  focusMusicEnabled: boolean;
+  focusMusicSource: "rain" | "campfire" | "external";
+  focusMusicUrl: string;
   workload: string;
   theme: "light" | "dark" | "auto";
   tone: string;
@@ -35,6 +38,9 @@ export const defaultSettings: AppSettings = {
   shortBreak: "5",
   longBreak: "15",
   cycleCount: "4",
+  focusMusicEnabled: false,
+  focusMusicSource: "rain",
+  focusMusicUrl: "",
   workload: "medium",
   theme: "light",
   tone: "supportive",

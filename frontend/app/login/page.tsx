@@ -11,6 +11,7 @@ import {
   saveAppSettings,
 } from "../../lib/settings";
 import type { AppSettings as SettingsState } from "../../lib/settings";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 type SettingIconName = "user" | "sliders" | "spark" | "link" | "bell" | "shield" | "card" | "upload" | "sun" | "moon" | "monitor" | "calendar";
 
@@ -114,10 +115,10 @@ function backendAppSettingsPayload(
 }
 
 function SettingIcon({ name, size = 19 }: { name: SettingIconName; size?: number }) {
-  const paths: Record<SettingIconName, React.ReactNode> = {
+  if (name === "spark") return <WitchHatIcon size={size} />;
+  const paths: Record<Exclude<SettingIconName, "spark">, React.ReactNode> = {
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     sliders: <><path d="M4 6h7M15 6h5M4 12h3M11 12h9M4 18h9M17 18h3" /><circle cx="13" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="15" cy="18" r="2" /></>,
-    spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
     link: <><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2" /><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2" /></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     shield: <><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z" /><path d="m9 12 2 2 4-4" /></>,

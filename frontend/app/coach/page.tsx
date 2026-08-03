@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, AutomationCommand, CoachChatMessage } from "../../lib/api";
 import { useAppSettings } from "../../lib/settings";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 const COACH_SESSION_KEY = "ai-life-coach-conversation";
 const WELCOME_MESSAGE: CoachChatMessage = {
@@ -31,7 +32,7 @@ function looksLikeSystemCommand(message: string) {
 }
 
 function CoachSpark({ size = 20 }: { size?: number }) {
-  return <svg aria-hidden="true" fill="none" height={size} viewBox="0 0 24 24" width={size}><path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" /></svg>;
+  return <WitchHatIcon size={size} />;
 }
 
 export default function CoachPage() {

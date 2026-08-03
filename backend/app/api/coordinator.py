@@ -17,7 +17,11 @@ router = APIRouter()
 
 
 @router.post("/chat", response_model=CoordinatorChatResponse)
-async def chat(request: CoordinatorChatRequest) -> CoordinatorChatResponse:
+async def chat(
+    request: CoordinatorChatRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> CoordinatorChatResponse:
     if not settings.ollama_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -26,6 +30,8 @@ async def chat(request: CoordinatorChatRequest) -> CoordinatorChatResponse:
 
     try:
         reply = await coordinator_service.answer(
+            db=db,
+            user=user,
             message=request.message,
             history=[item.model_dump() for item in request.history],
         )

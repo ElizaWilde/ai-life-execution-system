@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, DailyTask, StudySession } from "../../lib/api";
 import {
+  FOCUS_TIMER_EVENT,
   FOCUS_TIMER_KEY,
   SharedFocusTimerState,
   pauseSharedFocusTimer,
@@ -20,6 +21,7 @@ import {
   useAppSettings,
 } from "../../lib/settings";
 import { playTimerCompleteSound, primeTimerSound } from "../../lib/timer-sound";
+import { FocusMusicSource, stopFocusMusic, syncFocusMusic } from "../../lib/focus-music";
 
 type TimerPreferenceKey = "focusMinutes" | "shortBreak" | "longBreak" | "cycleCount";
 
@@ -35,20 +37,12 @@ function TimerIcon({ name }: { name: "clock" | "cycles" }) {
   );
 }
 
-function formatSessionDuration(session: StudySession) {
-  const totalSeconds = session.duration_seconds ?? (session.duration_minutes ?? 0) * 60;
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds ? `${minutes}m ${seconds}s` : `${minutes} min`;
-}
-
 export default function TimerPage() {
   const settings = useAppSettings();
   const targetMinutes = Math.max(1, Number(settings.focusMinutes) || 25);
   const targetSeconds = targetMinutes * 60;
+  const configuredCycles = Math.min(12, Math.max(1, Number(settings.cycleCount) || 4));
   const [tasks, setTasks] = useState<DailyTask[]>([]);
-  const [sessions, setSessions] = useState<StudySession[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [subject, setSubject] = useState("");
   const [notes, setNotes] = useState("");
@@ -61,6 +55,7 @@ export default function TimerPage() {
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState("");
   const [preferenceMessage, setPreferenceMessage] = useState("");
+  const [musicMessage, setMusicMessage] = useState("");
   const settingsSyncQueue = useRef<Promise<void>>(Promise.resolve());
 
   const sessionRemainingSeconds = useMemo(() => {
@@ -79,9 +74,9 @@ export default function TimerPage() {
         api.getTodaySessions(),
       ]);
       setTasks(loadedTasks);
-      setSessions(loadedSessions);
       const activeSession = loadedSessions.find((session) => session.status === "running") || null;
       setRunning(activeSession);
+      if (activeSession?.daily_task_id) setSelectedTaskId(String(activeSession.daily_task_id));
       const configuredSeconds = Math.max(1, Number(loadAppSettings().focusMinutes) || 25) * 60;
       let nextSharedTimer = readSharedFocusTimer();
       if (activeSession && nextSharedTimer?.studySessionId !== activeSession.id) {
@@ -119,8 +114,8 @@ export default function TimerPage() {
   }, [running, sessionRemainingSeconds, sharedTimer]);
 
   useEffect(() => {
-    const syncSharedTimer = (event: StorageEvent) => {
-      if (event.key !== FOCUS_TIMER_KEY) return;
+    const syncSharedTimer = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== FOCUS_TIMER_KEY) return;
       const next = readSharedFocusTimer();
       setSharedTimer(next);
       if (next?.studySessionId !== runningRef.current?.id && !sharedLoadBusyRef.current) {
@@ -131,7 +126,11 @@ export default function TimerPage() {
       }
     };
     window.addEventListener("storage", syncSharedTimer);
-    return () => window.removeEventListener("storage", syncSharedTimer);
+    window.addEventListener(FOCUS_TIMER_EVENT, syncSharedTimer);
+    return () => {
+      window.removeEventListener("storage", syncSharedTimer);
+      window.removeEventListener(FOCUS_TIMER_EVENT, syncSharedTimer);
+    };
   }, []);
 
   function syncTimerPreferences() {
@@ -176,9 +175,22 @@ export default function TimerPage() {
     syncTimerPreferences();
   }
 
+  function updateMusicPreference(patch: Partial<AppSettings>) {
+    const next = { ...loadAppSettings(), ...patch };
+    saveAppSettings(next);
+    setMusicMessage(next.focusMusicEnabled
+      ? "Music will play during focus time and pause during breaks."
+      : "Background music is off.");
+  }
+
   async function startSession() {
     setError("");
     void primeTimerSound();
+    if (settings.focusMusicEnabled) {
+      void syncFocusMusic(true, settings).catch(() => {
+        setMusicMessage("The selected audio could not be played. Check the URL or browser permission.");
+      });
+    }
     try {
       const selectedTask = tasks.find((task) => String(task.id) === selectedTaskId);
       const session = await api.startSession({
@@ -190,6 +202,7 @@ export default function TimerPage() {
       setRunning(session);
       await load();
     } catch (err) {
+      stopFocusMusic();
       setError(err instanceof Error ? err.message : "Failed to start session");
     }
   }
@@ -198,13 +211,18 @@ export default function TimerPage() {
     if (!running) return;
     setError("");
     try {
-      const focusedSeconds = Math.max(0, targetSeconds - sessionRemainingSeconds);
+      const focusedSeconds = (sharedTimer?.accumulatedFocusSeconds ?? 0) + (
+        sharedTimer?.mode === "focus"
+          ? Math.max(0, (sharedTimer.phaseDurationSeconds ?? targetSeconds) - sessionRemainingSeconds)
+          : 0
+      );
       await api.finishSession({
         session_id: running.id,
         duration_seconds: focusedSeconds,
         notes: notes || null,
       });
       void playTimerCompleteSound(sharedTimer?.endAt ?? `session-finish-${running.id}-${Date.now()}`);
+      stopFocusMusic();
       stopSharedFocusTimer(targetSeconds);
       setSharedTimer(readSharedFocusTimer());
       setRunning(null);
@@ -220,10 +238,13 @@ export default function TimerPage() {
     void primeTimerSound();
     const current = readSharedFocusTimer();
     if (current?.studySessionId !== running.id) {
+      if (settings.focusMusicEnabled) void syncFocusMusic(true, settings).catch(() => undefined);
       startSharedFocusTimer(targetSeconds, running.started_at, running.id);
     } else if (current.running) {
+      stopFocusMusic();
       pauseSharedFocusTimer();
     } else {
+      if (settings.focusMusicEnabled) void syncFocusMusic(true, settings).catch(() => undefined);
       resumeSharedFocusTimer();
     }
     setSharedTimer(readSharedFocusTimer());
@@ -237,6 +258,15 @@ export default function TimerPage() {
     sharedTimer?.studySessionId === running.id &&
     sharedTimer.running,
   );
+  const timerModeLabel = sharedTimer?.mode === "longBreak"
+    ? "Long break"
+    : sharedTimer?.mode === "shortBreak"
+      ? "Short break"
+      : "Focus time";
+  const currentCycle = Math.min(
+    configuredCycles,
+    Math.max(1, (sharedTimer?.completedFocusSessions ?? 0) + (sharedTimer?.mode === "focus" ? 1 : 0)),
+  );
 
   return (
     <section className="page timer-workspace-page">
@@ -244,7 +274,7 @@ export default function TimerPage() {
         <div>
           <p className="eyebrow">Timer</p>
           <h1>Study session</h1>
-          <p className="muted">Start a {targetMinutes}-minute focus session. Paired to a daily task.</p>
+          <p className="muted">Run {configuredCycles} automatic focus cycles and record {targetMinutes * configuredCycles} focus minutes to one daily task.</p>
           <p className="muted">Breaks: {settings.shortBreak} min short · {settings.longBreak} min long</p>
         </div>
       </header>
@@ -254,9 +284,9 @@ export default function TimerPage() {
       <div className="timer-workspace-grid">
         <div className="timer-workspace-left">
           <article className="card timer-session-card">
-            <h2>{running ? (timerIsRunning ? "Running session" : "Paused session") : "Start session"}</h2>
+            <h2>{running ? `${timerIsRunning ? "Running" : "Paused"} · ${timerModeLabel}` : "Start session"}</h2>
             <p className="stat">{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</p>
-            <p className="muted timer-session-meta">Timer · {targetMinutes}:00 · {selectedTaskId ? tasks.find((task) => String(task.id) === selectedTaskId)?.title : "No task set"}</p>
+            <p className="muted timer-session-meta">{timerModeLabel} · Cycle {currentCycle} of {configuredCycles} · {selectedTaskId ? tasks.find((task) => String(task.id) === selectedTaskId)?.title : "No task set"}</p>
             <div className="form timer-session-form">
               <label className="field"><span>Task</span><select className="input" disabled={Boolean(running)} value={selectedTaskId} onChange={(event) => setSelectedTaskId(event.target.value)}><option value="">No task set</option>{tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label>
               <label className="field"><span>Subject</span><input className="input" disabled={Boolean(running)} placeholder="Optional subject" value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
@@ -264,7 +294,7 @@ export default function TimerPage() {
             </div>
             <div className="actions timer-session-actions">
               {!running ? (
-                <button className="button primary" onClick={startSession}>Start {targetMinutes} min session</button>
+                <button className="button primary" onClick={startSession}>Start {configuredCycles}-cycle session</button>
               ) : (
                 <>
                   <button className="button primary" onClick={toggleSessionTimer}>{timerIsRunning ? "Pause" : "Resume"}</button>
@@ -272,7 +302,7 @@ export default function TimerPage() {
                 </>
               )}
             </div>
-            {running && sessionRemainingSeconds === 0 ? <p className="success">Focus target reached. Finish when you are ready.</p> : null}
+            {running ? <p className="muted">Focus and break phases advance automatically. Pause only when you need to interrupt the cycle.</p> : null}
           </article>
 
           <article className="card timer-preferences-card">
@@ -287,12 +317,21 @@ export default function TimerPage() {
           </article>
         </div>
 
-        <article className="card timer-sessions-card">
-          <h2>Today’s sessions</h2>
-          <div className="list">
-            {sessions.length === 0 ? <p className="muted">No sessions today.</p> : null}
-            {sessions.map((session) => <article className="item" key={session.id}><div className="item-row"><strong>{session.subject}</strong><span className={`badge ${session.status === "completed" ? "done" : ""}`}>{session.status}</span></div><p className="muted">{formatSessionDuration(session)}{session.notes ? ` · ${session.notes}` : ""}</p></article>)}
+        <article className="card timer-music-card">
+          <div className="timer-music-heading">
+            <div><p className="eyebrow">Focus ambience</p><h2>Background music</h2></div>
+            <label className="timer-music-switch">
+              <input checked={settings.focusMusicEnabled} onChange={(event) => updateMusicPreference({ focusMusicEnabled: event.target.checked })} type="checkbox" />
+              <span aria-hidden="true" />
+              <strong>{settings.focusMusicEnabled ? "On" : "Off"}</strong>
+            </label>
           </div>
+          <p className="muted timer-music-description">Play a quiet background sound when focus time starts. It pauses automatically during short and long breaks.</p>
+          <div className="timer-music-options">
+            <label className="field"><span>Sound</span><select className="input" disabled={!settings.focusMusicEnabled} value={settings.focusMusicSource} onChange={(event) => updateMusicPreference({ focusMusicSource: event.target.value as FocusMusicSource })}><option value="rain">Rain</option><option value="campfire">Campfire</option><option value="external">Audio from another website</option></select></label>
+            {settings.focusMusicSource === "external" ? <label className="field"><span>YouTube or audio URL</span><input className="input" disabled={!settings.focusMusicEnabled} inputMode="url" placeholder="https://www.youtube.com/watch?v=..." type="url" value={settings.focusMusicUrl} onChange={(event) => updateMusicPreference({ focusMusicUrl: event.target.value })} /><small>Paste a YouTube watch/share link, or a direct link to an audio file or stream.</small></label> : null}
+          </div>
+          <div className="timer-music-note"><span aria-hidden="true">♫</span><p>{musicMessage || (settings.focusMusicEnabled ? "Ready for your next focus session." : "Turn this on to add ambience to focus sessions.")}</p></div>
         </article>
       </div>
     </section>

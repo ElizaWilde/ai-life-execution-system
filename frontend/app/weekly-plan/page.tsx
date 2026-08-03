@@ -13,12 +13,13 @@ import {
   WeeklyGoal,
   WeeklyPlanPreview,
 } from "../../lib/api";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target" | "flag" | "clock" | "people" | "edit" | "more" | "grip";
 
 function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
-  const paths: Record<PlanIconName, React.ReactNode> = {
-    spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
+  if (name === "spark") return <WitchHatIcon size={size} />;
+  const paths: Record<Exclude<PlanIconName, "spark">, React.ReactNode> = {
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
     chart: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /></>,
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,

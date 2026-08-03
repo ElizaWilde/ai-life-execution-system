@@ -4,9 +4,11 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, DailyTask, ParkedThought, TodayDashboard, WeekDashboard } from "../../lib/api";
 import { subscribeToCheckInUpdates } from "../../lib/check-in-sync";
-import { FOCUS_TIMER_KEY } from "../../lib/focus-timer-sync";
+import { FOCUS_TIMER_EVENT, FOCUS_TIMER_KEY, reconcileSharedFocusTimer } from "../../lib/focus-timer-sync";
 import { loadAppSettings, orderByWeekStart, useAppSettings } from "../../lib/settings";
 import { playTimerCompleteSound, primeTimerSound } from "../../lib/timer-sound";
+import { stopFocusMusic, syncFocusMusic } from "../../lib/focus-music";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 type IconName =
   | "calendar"
@@ -36,6 +38,7 @@ type PersistentTimerState = {
   running: boolean;
   endAt: number | null;
   completedFocusSessions: number;
+  accumulatedFocusSeconds: number;
   studySessionId: number | null;
 };
 
@@ -52,6 +55,7 @@ function initialTimerState(focusDurationSeconds: number): PersistentTimerState {
     running: false,
     endAt: null,
     completedFocusSessions: 0,
+    accumulatedFocusSeconds: 0,
     studySessionId: null,
   };
 }
@@ -74,6 +78,7 @@ function loadFocusTimer(focusDurationSeconds: number): PersistentTimerState {
       running: Boolean(parsed.running && Number.isFinite(parsed.endAt)),
       endAt: parsed.running && Number.isFinite(parsed.endAt) ? Number(parsed.endAt) : null,
       completedFocusSessions: Math.max(0, Number(parsed.completedFocusSessions) || 0),
+      accumulatedFocusSeconds: Math.max(0, Number(parsed.accumulatedFocusSeconds) || 0),
       studySessionId: Number(parsed.studySessionId) > 0 ? Number(parsed.studySessionId) : null,
     };
   } catch {
@@ -91,62 +96,17 @@ function reconcileTimer(
   now: number,
   durations: TimerDurations,
 ): PersistentTimerState {
-  if (!timer.running || timer.endAt === null) return timer;
-
-  let mode = timer.mode;
-  let endAt = timer.endAt;
-  let phaseDurationSeconds = timer.phaseDurationSeconds;
-  let completedFocusSessions = timer.completedFocusSessions;
-  let transitions = 0;
-
-  while (endAt <= now && transitions < 100) {
-    if (mode === "focus") {
-      completedFocusSessions += 1;
-      mode = completedFocusSessions >= durations.cycleCount ? "longBreak" : "shortBreak";
-    } else if (mode === "longBreak") {
-      return {
-        mode: "focus",
-        remainingSeconds: durations.focus,
-        phaseDurationSeconds: durations.focus,
-        running: false,
-        endAt: null,
-        completedFocusSessions: 0,
-        studySessionId: null,
-      };
-    } else {
-      mode = "focus";
-    }
-    phaseDurationSeconds = durationForMode(mode, durations);
-    endAt += phaseDurationSeconds * 1000;
-    transitions += 1;
-  }
-
-  if (transitions === 100 && endAt <= now) {
-    mode = "focus";
-    completedFocusSessions = 0;
-    phaseDurationSeconds = durations.focus;
-    endAt = now + phaseDurationSeconds * 1000;
-  }
-
-  return {
-    mode,
-    remainingSeconds: Math.max(0, Math.ceil((endAt - now) / 1000)),
-    phaseDurationSeconds,
-    running: true,
-    endAt,
-    completedFocusSessions,
-    studySessionId: timer.studySessionId,
-  };
+  return reconcileSharedFocusTimer(timer, now, durations);
 }
 
 function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, React.ReactNode> = {
+  if (name === "spark") return <WitchHatIcon size={size} />;
+  const paths: Record<Exclude<IconName, "spark">, React.ReactNode> = {
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></>,
     chart: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
     check: <><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></>,
     alert: <><path d="M10.3 3.8 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></>,
-    spark: <><path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z"/></>,
     brain: <><path d="M9.5 4.5A3 3 0 0 0 4 6a3 3 0 0 0 .5 5.5A3 3 0 0 0 6 17a3 3 0 0 0 5.5 1.5V5.2a2.7 2.7 0 0 0-2-2.7ZM14.5 4.5A3 3 0 0 1 20 6a3 3 0 0 1-.5 5.5A3 3 0 0 1 18 17a3 3 0 0 1-5.5 1.5V5.2a2.7 2.7 0 0 1 2-2.7Z"/><path d="M7 9.5h2.5M17 9.5h-2.5"/></>,
     energy: <path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/>,
     smile: <><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8 14s1.5 2 4 2 4-2 4-2"/></>,
@@ -244,13 +204,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!timerHydrated) return;
-    const syncSharedTimer = (event: StorageEvent) => {
-      if (event.key !== FOCUS_TIMER_KEY) return;
+    const syncSharedTimer = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== FOCUS_TIMER_KEY) return;
       setTimer(loadFocusTimer(focusDurationSeconds));
       void refreshPlanStats();
     };
     window.addEventListener("storage", syncSharedTimer);
-    return () => window.removeEventListener("storage", syncSharedTimer);
+    window.addEventListener(FOCUS_TIMER_EVENT, syncSharedTimer);
+    return () => {
+      window.removeEventListener("storage", syncSharedTimer);
+      window.removeEventListener(FOCUS_TIMER_EVENT, syncSharedTimer);
+    };
   }, [focusDurationSeconds, timerHydrated]);
 
   useEffect(() => {
@@ -329,21 +293,6 @@ export default function DashboardPage() {
   }, [timer, timerHydrated]);
 
   useEffect(() => {
-    if (!timerHydrated || timer.mode === "focus" || !timer.studySessionId) return;
-    const sessionId = timer.studySessionId;
-    void api.finishSession({ session_id: sessionId, duration_seconds: focusDurationSeconds })
-      .then(() => {
-        setTimer((current) => current.studySessionId === sessionId
-          ? { ...current, studySessionId: null }
-          : current);
-        void refreshPlanStats();
-      })
-      .catch((reason) => {
-        setError(reason instanceof Error ? reason.message : "Could not finish the linked study session");
-      });
-  }, [focusDurationSeconds, timer.mode, timer.studySessionId, timerHydrated]);
-
-  useEffect(() => {
     if (!timerHydrated) return;
     const pauseWhenDocumentCloses = () => {
       const durations: TimerDurations = {
@@ -409,11 +358,15 @@ export default function DashboardPage() {
     };
     const synced = reconcileTimer(timerRef.current, Date.now(), durations);
     if (synced.running) {
+      stopFocusMusic();
       setTimer({ ...synced, running: false, endAt: null });
       return;
     }
 
     setTimerControlBusy(true);
+    if (synced.mode === "focus" && appSettings.focusMusicEnabled) {
+      void syncFocusMusic(true, appSettings).catch(() => undefined);
+    }
     try {
       let studySessionId = synced.studySessionId;
       if (synced.mode === "focus" && !studySessionId) {
@@ -473,13 +426,14 @@ export default function DashboardPage() {
       running: false,
       endAt: null,
       completedFocusSessions,
+      accumulatedFocusSeconds: 0,
       studySessionId: null,
     };
     if (synced.studySessionId) {
       try {
-        const focusedSeconds = synced.mode === "focus"
+        const focusedSeconds = synced.accumulatedFocusSeconds + (synced.mode === "focus"
           ? Math.max(0, synced.phaseDurationSeconds - synced.remainingSeconds)
-          : focusDurationSeconds;
+          : 0);
         await api.finishSession({
           session_id: synced.studySessionId,
           duration_seconds: focusedSeconds,
@@ -492,6 +446,7 @@ export default function DashboardPage() {
       }
     }
     void playTimerCompleteSound(synced.endAt ?? `dashboard-finish-${Date.now()}`);
+    stopFocusMusic();
     setTimer(finishedTimer);
     setTimerControlBusy(false);
   }

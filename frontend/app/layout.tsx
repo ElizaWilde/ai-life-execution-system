@@ -5,9 +5,10 @@ import "../styles/globals.css";
  * Link is a React component provided by Next.js for navigation between pages.
  * Link supports optimized client-side navigation and route prefetching. This normally makes navigation faster and avoids reloading the entire webpage.
  */
-import Sidebar from "../components/layout/Sidebar";
+import AppShell from "../components/layout/AppShell";
 import SettingsSync from "../components/layout/SettingsSync";
 import CoachCharacter2D from "../components/layout/CoachCharacter2D";
+import FocusMusicController from "../components/layout/FocusMusicController";
 /**
  * ReactNode is a TS type that represents any valid React child, including elements, strings, numbers, fragments, portals, and arrays of these types. 
  * React documents ReactNode as the union of the possible types that can be passed as JSX children.
@@ -33,11 +34,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <SettingsSync />
-        <div className="app-shell">
-          <Sidebar />
-          {/* Render the current page content inside the <main> area. */}
-          <main className="main-content">{children}</main>
-        </div>
+        <FocusMusicController />
+        <AppShell>{children}</AppShell>
         <CoachCharacter2D />
       </body>
     </html>

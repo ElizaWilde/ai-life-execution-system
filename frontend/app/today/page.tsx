@@ -18,12 +18,13 @@ import { useAppSettings, workloadMinutes } from "../../lib/settings";
 import { announceCheckInUpdate, subscribeToCheckInUpdates } from "../../lib/check-in-sync";
 import { AVAILABLE_TIME_OPTIONS, availableTimeBucket } from "../../lib/check-in-options";
 import DailyReviewModule from "../../components/daily-review-module";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 type TodayIconName = "spark" | "clock" | "check" | "trash" | "sleep" | "energy" | "mood" | "calendar" | "target" | "chart" | "edit";
 
 function TodayIcon({ name, size = 18 }: { name: TodayIconName; size?: number }) {
-  const paths: Record<TodayIconName, React.ReactNode> = {
-    spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
+  if (name === "spark") return <WitchHatIcon size={size} />;
+  const paths: Record<Exclude<TodayIconName, "spark">, React.ReactNode> = {
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
     trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,

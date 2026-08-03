@@ -12,6 +12,7 @@ import {
   EnergyLevel,
   MoodLevel,
 } from "../../lib/api";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 type ConditionIconName = EnergyLevel | "moodLow" | "struggling" | "neutral" | "good" | "great" | "smile" | "spark" | "target" | "calendar" | "clock" | "focus" | "difficulty";
 
@@ -39,7 +40,8 @@ const difficultyOptions = [
 ] as const;
 
 function ConditionIcon({ name, size = 22 }: { name: ConditionIconName; size?: number }) {
-  const paths: Record<ConditionIconName, React.ReactNode> = {
+  if (name === "spark") return <WitchHatIcon size={size} />;
+  const paths: Record<Exclude<ConditionIconName, "spark">, React.ReactNode> = {
     depleted: <><rect x="4" y="7" width="15" height="10" rx="2"/><path d="M21 10v4"/></>,
     low: <><rect x="4" y="7" width="15" height="10" rx="2"/><path d="M7 10v4M21 10v4"/></>,
     steady: <path d="M3 12c2.2-5 4.4 5 6.6 0s4.4 5 6.6 0 3.2-2.5 4.8 0"/>,
@@ -51,7 +53,6 @@ function ConditionIcon({ name, size = 22 }: { name: ConditionIconName; size?: nu
     good: <><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1.5 2 5.5 2 7 0"/></>,
     great: <><circle cx="12" cy="12" r="9"/><path d="m12 7 1.2 2.4 2.7.4-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.4L12 7Z"/></>,
     smile: <><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1.5 2 5.5 2 7 0"/></>,
-    spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z"/>,
     target: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m15 9 6-6M17 3h4v4"/></>,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M9 15l2 2 4-5"/></>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,

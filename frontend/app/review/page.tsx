@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { api, DailyTask, TodayDashboard, WeekDashboard, WeeklyReview, WorkingDay } from "../../lib/api";
+import WitchHatIcon from "../../components/common/WitchHatIcon";
 
 function ReviewIcon({ name, size = 18 }: { name: "spark" | "check" | "clock" | "alert" | "calendar"; size?: number }) {
+  if (name === "spark") return <WitchHatIcon size={size} />;
   const paths = {
-    spark: <path d="m12 2 1.6 5.1a5 5 0 0 0 3.3 3.3L22 12l-5.1 1.6a5 5 0 0 0-3.3 3.3L12 22l-1.6-5.1a5 5 0 0 0-3.3-3.3L2 12l5.1-1.6a5 5 0 0 0 3.3-3.3L12 2Z" />,
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     alert: <><path d="M10.3 3.8 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></>,
