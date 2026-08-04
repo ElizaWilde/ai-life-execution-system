@@ -53,3 +53,10 @@ export async function playTimerCompleteSound(notificationId?: string | number) {
     // Browsers may block background audio until the next user interaction.
   }
 }
+
+export function playTimerStartSound(notificationId?: string | number) {
+  const soundId = notificationId === undefined
+    ? `timer-start-${Date.now()}`
+    : `timer-start-${notificationId}`;
+  return playTimerCompleteSound(soundId);
+}

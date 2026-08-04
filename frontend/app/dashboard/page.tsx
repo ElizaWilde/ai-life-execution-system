@@ -6,7 +6,7 @@ import { api, DailyTask, ParkedThought, TodayDashboard, WeekDashboard } from "..
 import { subscribeToCheckInUpdates } from "../../lib/check-in-sync";
 import { FOCUS_TIMER_EVENT, FOCUS_TIMER_KEY, reconcileSharedFocusTimer } from "../../lib/focus-timer-sync";
 import { loadAppSettings, orderByWeekStart, useAppSettings } from "../../lib/settings";
-import { playTimerCompleteSound, primeTimerSound } from "../../lib/timer-sound";
+import { playTimerCompleteSound, playTimerStartSound, primeTimerSound } from "../../lib/timer-sound";
 import { stopFocusMusic, syncFocusMusic } from "../../lib/focus-music";
 import WitchHatIcon from "../../components/common/WitchHatIcon";
 
@@ -360,6 +360,7 @@ export default function DashboardPage() {
     if (synced.running) {
       stopFocusMusic();
       setTimer({ ...synced, running: false, endAt: null });
+      void playTimerCompleteSound(`dashboard-pause-${Date.now()}`);
       return;
     }
 
@@ -391,6 +392,7 @@ export default function DashboardPage() {
         endAt: Date.now() + remainingSeconds * 1000,
         studySessionId,
       });
+      void playTimerStartSound(`dashboard-${studySessionId ?? "break"}-${Date.now()}`);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not start the focus session");

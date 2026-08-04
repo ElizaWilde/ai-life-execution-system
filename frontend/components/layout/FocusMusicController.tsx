@@ -12,6 +12,7 @@ import {
 import { api } from "../../lib/api";
 import { syncFocusMusic } from "../../lib/focus-music";
 import { SETTINGS_EVENT, SETTINGS_KEY, loadAppSettings } from "../../lib/settings";
+import { playTimerCompleteSound } from "../../lib/timer-sound";
 
 export default function FocusMusicController() {
   const finishingSessionRef = useRef<number | null>(null);
@@ -33,6 +34,9 @@ export default function FocusMusicController() {
         current.endAt !== timer.endAt ||
         current.completedFocusSessions !== timer.completedFocusSessions
       )) {
+        if (current.running && current.endAt !== null && current.endAt <= Date.now()) {
+          void playTimerCompleteSound(current.endAt);
+        }
         writeSharedFocusTimer(timer);
       }
       const shouldPlay = Boolean(

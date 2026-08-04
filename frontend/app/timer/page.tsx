@@ -20,7 +20,7 @@ import {
   saveAppSettings,
   useAppSettings,
 } from "../../lib/settings";
-import { playTimerCompleteSound, primeTimerSound } from "../../lib/timer-sound";
+import { playTimerCompleteSound, playTimerStartSound, primeTimerSound } from "../../lib/timer-sound";
 import { FocusMusicSource, stopFocusMusic, syncFocusMusic } from "../../lib/focus-music";
 
 type TimerPreferenceKey = "focusMinutes" | "shortBreak" | "longBreak" | "cycleCount";
@@ -200,6 +200,7 @@ export default function TimerPage() {
       startSharedFocusTimer(targetSeconds, session.started_at, session.id);
       setSharedTimer(readSharedFocusTimer());
       setRunning(session);
+      void playTimerStartSound(`session-${session.id}`);
       await load();
     } catch (err) {
       stopFocusMusic();
@@ -240,12 +241,15 @@ export default function TimerPage() {
     if (current?.studySessionId !== running.id) {
       if (settings.focusMusicEnabled) void syncFocusMusic(true, settings).catch(() => undefined);
       startSharedFocusTimer(targetSeconds, running.started_at, running.id);
+      void playTimerStartSound(`session-${running.id}-${Date.now()}`);
     } else if (current.running) {
       stopFocusMusic();
       pauseSharedFocusTimer();
+      void playTimerCompleteSound(`session-pause-${running.id}-${Date.now()}`);
     } else {
       if (settings.focusMusicEnabled) void syncFocusMusic(true, settings).catch(() => undefined);
       resumeSharedFocusTimer();
+      void playTimerStartSound(`session-resume-${running.id}-${Date.now()}`);
     }
     setSharedTimer(readSharedFocusTimer());
     setNow(Date.now());
