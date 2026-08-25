@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, DailyTask, ParkedThought, TodayDashboard, WeekDashboard } from "../../lib/api";
 import { subscribeToCheckInUpdates } from "../../lib/check-in-sync";
+import { subscribeToTaskUpdates } from "../../lib/task-sync";
 import { FOCUS_TIMER_EVENT, FOCUS_TIMER_KEY, reconcileSharedFocusTimer } from "../../lib/focus-timer-sync";
 import { loadAppSettings, orderByWeekStart, useAppSettings } from "../../lib/settings";
 import { playTimerCompleteSound, playTimerStartSound, primeTimerSound } from "../../lib/timer-sound";
@@ -129,6 +130,36 @@ function dateKey(value: Date) {
   return `${year}-${month}-${day}`;
 }
 
+const DASHBOARD_DAY_START = 7 * 60;
+const DASHBOARD_DAY_END = 22 * 60;
+const DASHBOARD_SCHEDULE_SCALE = 0.55;
+
+function formatScheduleTime(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  return `${hour % 12 || 12}${minute ? `:${String(minute).padStart(2, "0")}` : ""} ${suffix}`;
+}
+
+function dashboardScheduleEntries(tasks: DailyTask[]) {
+  let cursor = 8 * 60;
+  return tasks
+    .filter((task) => task.status !== "cancelled")
+    .map((task) => {
+      const duration = Math.max(15, task.estimated_minutes ?? 30);
+      const requestedStart = task.scheduled_start_minutes ?? cursor;
+      const start = Math.min(
+        Math.max(requestedStart, DASHBOARD_DAY_START),
+        Math.max(DASHBOARD_DAY_START, DASHBOARD_DAY_END - duration),
+      );
+      if (task.scheduled_start_minutes === null) {
+        cursor = Math.min(start + duration + 15, DASHBOARD_DAY_END - 15);
+      }
+      return { task, start, duration };
+    })
+    .sort((left, right) => left.start - right.start || left.task.id - right.task.id);
+}
+
 function titleCase(value?: string | null) {
   if (!value) return "-";
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -174,6 +205,11 @@ export default function DashboardPage() {
   const [parkedThoughts, setParkedThoughts] = useState<ParkedThought[]>([]);
   const [parkInput, setParkInput] = useState("");
   const [parkBusy, setParkBusy] = useState(false);
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState<string | null>(null);
+  const [openScheduleDate, setOpenScheduleDate] = useState<string | null>(null);
+  const [openScheduleTasks, setOpenScheduleTasks] = useState<DailyTask[]>([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [calendarNow, setCalendarNow] = useState<Date | null>(null);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -193,13 +229,24 @@ export default function DashboardPage() {
     }
 
     loadDashboard();
-    return subscribeToCheckInUpdates(dateKey(new Date()), loadDashboard);
+    const unsubscribeCheckIns = subscribeToCheckInUpdates(dateKey(new Date()), loadDashboard);
+    const unsubscribeTasks = subscribeToTaskUpdates(loadDashboard);
+    return () => {
+      unsubscribeCheckIns();
+      unsubscribeTasks();
+    };
   }, []);
 
   useEffect(() => {
     const savedMinutes = Number(loadAppSettings().focusMinutes) || 25;
     setTimer(loadFocusTimer(Math.max(1, savedMinutes) * 60));
     setTimerHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    setCalendarNow(new Date());
+    const interval = window.setInterval(() => setCalendarNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -341,6 +388,23 @@ export default function DashboardPage() {
       };
     });
   }, [appSettings.weekStart, currentDate, week?.daily_focus]);
+  const activeScheduleDate = selectedScheduleDate ?? dateKey(currentDate);
+  const openScheduleEntries = useMemo(
+    () => dashboardScheduleEntries(openScheduleTasks),
+    [openScheduleTasks],
+  );
+  const scheduleHours = Array.from(
+    { length: (DASHBOARD_DAY_END - DASHBOARD_DAY_START) / 60 + 1 },
+    (_, index) => DASHBOARD_DAY_START + index * 60,
+  );
+  const scheduleHeight = (DASHBOARD_DAY_END - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE;
+  const currentScheduleMinutes = calendarNow ? calendarNow.getHours() * 60 + calendarNow.getMinutes() : -1;
+  const showScheduleNow = Boolean(
+    calendarNow &&
+    openScheduleDate === dateKey(calendarNow) &&
+    currentScheduleMinutes >= DASHBOARD_DAY_START &&
+    currentScheduleMinutes <= DASHBOARD_DAY_END,
+  );
   const timerDurationSeconds = timer.phaseDurationSeconds;
   const timerProgress = Math.min(1, timer.remainingSeconds / timerDurationSeconds);
   const timerDisplay = `${String(Math.floor(timer.remainingSeconds / 60)).padStart(2, "0")}:${String(timer.remainingSeconds % 60).padStart(2, "0")}`;
@@ -527,6 +591,27 @@ export default function DashboardPage() {
     }
   }
 
+  function selectScheduleDate(date: string) {
+    setSelectedScheduleDate(date);
+    setOpenScheduleDate(null);
+    setOpenScheduleTasks([]);
+  }
+
+  async function displayScheduleForDate(date: string) {
+    setSelectedScheduleDate(date);
+    setOpenScheduleDate(date);
+    setOpenScheduleTasks([]);
+    setScheduleLoading(true);
+    try {
+      setOpenScheduleTasks(await api.getTasksForDate(date));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not load that day's schedule");
+    } finally {
+      setScheduleLoading(false);
+    }
+  }
+
   return (
     <section className="life-dashboard">
       <header className="life-hero">
@@ -643,15 +728,49 @@ export default function DashboardPage() {
       <div className="dashboard-bottom-grid">
         <article className="panel schedule-panel">
           <div className="panel-heading"><div><h2>Schedule</h2><span className="schedule-range">{weekCalendar[0].date.toLocaleDateString("en", { month: "short", day: "numeric" })} – {weekCalendar[6].date.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span></div><Link href="/weekly-plan">View plan</Link></div>
+          <p className="schedule-interaction-hint">Click a day to highlight it. Double-click to display its schedule.</p>
           <div className="week-calendar">
             {weekCalendar.map((day) => (
-              <article className={`week-calendar-day ${day.isToday ? "today" : ""}`} key={day.key}>
-                <header><span>{day.date.toLocaleDateString("en", { weekday: "short" })}</span><strong>{day.date.getDate()}</strong></header>
+              <article
+                aria-current={day.isToday ? "date" : undefined}
+                aria-label={`${day.date.toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}. Double-click to display schedule.`}
+                aria-pressed={activeScheduleDate === day.key}
+                className={`week-calendar-day ${day.isToday ? "today" : ""} ${activeScheduleDate === day.key ? "selected" : ""}`}
+                key={day.key}
+                onClick={() => selectScheduleDate(day.key)}
+                onDoubleClick={() => void displayScheduleForDate(day.key)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.preventDefault(); void displayScheduleForDate(day.key); }
+                  if (event.key === " ") { event.preventDefault(); selectScheduleDate(day.key); }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <header><span>{day.date.toLocaleDateString("en", { weekday: "short" })}{day.isToday ? <em>Today</em> : null}</span><strong>{day.date.getDate()}</strong></header>
                 <div className={day.plannedMinutes ? "planned" : "open"}><b>{day.plannedMinutes ? formatDuration(day.plannedMinutes) : "Open"}</b><span>{day.plannedMinutes ? "planned" : "capacity"}</span></div>
                 <small>{day.focusMinutes ? `${formatDuration(day.focusMinutes)} focused` : "No focus logged"}</small>
               </article>
             ))}
           </div>
+          {openScheduleDate ? <section className="dashboard-day-schedule" aria-label={`Schedule for ${openScheduleDate}`}>
+            <header>
+              <div><span>{new Date(`${openScheduleDate}T00:00:00`).toLocaleDateString("en", { weekday: "long" })}</span><strong>{new Date(`${openScheduleDate}T00:00:00`).toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</strong></div>
+              <button aria-label="Close displayed schedule" onClick={() => setOpenScheduleDate(null)} type="button">×</button>
+            </header>
+            <div className="dashboard-day-schedule-scroll">
+              <div className="dashboard-day-schedule-grid" style={{ height: `${scheduleHeight}px` }}>
+                {scheduleHours.map((minutes) => <div className="dashboard-day-schedule-hour" key={minutes} style={{ top: `${(minutes - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}><time>{formatScheduleTime(minutes)}</time><i /></div>)}
+                {openScheduleEntries.map(({ task, start, duration }) => <article
+                  className={`dashboard-day-schedule-task ${task.priority} ${task.status === "completed" ? "completed" : ""}`}
+                  key={task.id}
+                  style={{ height: `${Math.max(28, duration * DASHBOARD_SCHEDULE_SCALE)}px`, top: `${(start - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}
+                ><strong>{task.title}</strong><span>{formatScheduleTime(start)} – {formatScheduleTime(start + duration)}</span></article>)}
+                {showScheduleNow ? <div className="dashboard-schedule-now" style={{ top: `${(currentScheduleMinutes - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}><span>{formatScheduleTime(currentScheduleMinutes)}</span><i /></div> : null}
+                {scheduleLoading ? <p className="dashboard-day-schedule-empty">Loading schedule…</p> : null}
+                {!scheduleLoading && openScheduleEntries.length === 0 ? <p className="dashboard-day-schedule-empty">No tasks scheduled for this date.</p> : null}
+              </div>
+            </div>
+          </section> : null}
         </article>
 
         <article className="panel focus-panel">

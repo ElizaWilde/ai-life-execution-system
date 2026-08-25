@@ -1,13 +1,9 @@
 import { getStoredUserId } from "./auth";
+import { announceTaskUpdate } from "./task-sync";
 
-declare const process: {
-  env: {
-    NEXT_PUBLIC_API_BASE_URL?: string;
-  };
-};
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+// Keep browser requests on the same origin as the frontend. Next.js proxies
+// /api/* to FastAPI, so LAN clients never try to reach their own localhost.
+const API_BASE_URL = "/api";
 
 export type Priority = "low" | "medium" | "high" | "urgent";
 export type TaskChannel = "work" | "assignments" | "networking" | "projects" | "study" | "personal";
@@ -41,7 +37,7 @@ export type UserAppSettings = {
   id: number;
   user_id: number;
   week_start: "Monday" | "Sunday";
-  focus_minutes: 25 | 45 | 60;
+  focus_minutes: 15 | 25 | 45 | 60;
   short_break_minutes: 5 | 10;
   long_break_minutes: 15 | 30;
   cycle_count: number;
@@ -66,6 +62,7 @@ export type AutomationPreferences = {
   id: number;
   user_id: number;
   timezone: string;
+  automation_enabled: boolean;
   morning_reminder_time: string;
   evening_review_time: string;
   notification_channel: NotificationChannel;
@@ -162,6 +159,7 @@ export type DailyTask = {
   planning_scope: "daily" | "weekly";
   due_at: string;
   is_overdue: boolean;
+  scheduled_start_minutes: number | null;
   estimated_minutes: number | null;
   channel: TaskChannel | null;
   priority: Priority;
@@ -539,22 +537,32 @@ export const api = {
   getTodayTasks: () => request<DailyTask[]>("/daily-tasks/today"),
   getTasksForDate: (date: string) =>
     request<DailyTask[]>(`/daily-tasks?date=${encodeURIComponent(date)}`),
-  createTask: (body: {
+  createTask: async (body: {
     title: string;
     description?: string | null;
     task_date: string;
     planning_scope?: "daily" | "weekly";
     due_at?: string | null;
+    scheduled_start_minutes?: number | null;
     estimated_minutes?: number | null;
     channel?: TaskChannel | null;
     priority?: Priority;
     weekly_goal_id?: number | null;
     source?: "manual";
-  }) => request<DailyTask>("/daily-tasks", { method: "POST", body }),
-  updateTask: (id: number, body: Partial<DailyTask>) =>
-    request<DailyTask>(`/daily-tasks/${id}`, { method: "PATCH", body }),
-  deleteTask: (id: number) =>
-    request<void>(`/daily-tasks/${id}`, { method: "DELETE" }),
+  }) => {
+    const task = await request<DailyTask>("/daily-tasks", { method: "POST", body });
+    announceTaskUpdate();
+    return task;
+  },
+  updateTask: async (id: number, body: Partial<DailyTask>) => {
+    const task = await request<DailyTask>(`/daily-tasks/${id}`, { method: "PATCH", body });
+    announceTaskUpdate();
+    return task;
+  },
+  deleteTask: async (id: number) => {
+    await request<void>(`/daily-tasks/${id}`, { method: "DELETE" });
+    announceTaskUpdate();
+  },
 
   generateReschedulingProposal: (horizonDays = 14) =>
     request<ReschedulingProposal | null>("/automation/rescheduling-proposals", {

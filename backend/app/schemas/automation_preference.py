@@ -30,6 +30,7 @@ class StudyPeriod(BaseModel):
 
 class AutomationPreferenceFields(BaseModel):
     timezone: str = Field(default="Asia/Singapore", min_length=1, max_length=100)
+    automation_enabled: bool = True
     morning_reminder_time: time = time(8, 0)
     evening_review_time: time = time(21, 0)
     notification_channel: NotificationChannel = "email"
@@ -81,6 +82,7 @@ class AutomationPreferenceFields(BaseModel):
 
 class AutomationPreferenceUpdate(BaseModel):
     timezone: str | None = Field(default=None, min_length=1, max_length=100)
+    automation_enabled: bool | None = None
     morning_reminder_time: time | None = None
     evening_review_time: time | None = None
     notification_channel: NotificationChannel | None = None

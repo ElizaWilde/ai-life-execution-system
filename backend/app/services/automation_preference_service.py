@@ -1,7 +1,7 @@
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import AutomationPreference
+from app.models import AutomationPreference, Notification
 from app.schemas.automation_preference import AutomationPreferenceUpdate
 
 
@@ -35,6 +35,18 @@ class AutomationPreferenceService:
             data.pop("preferred_study_periods")
         for field, value in data.items():
             setattr(preference, field, value)
+        if data.get("automation_enabled") is False:
+            db.execute(
+                update(Notification)
+                .where(
+                    Notification.user_id == user_id,
+                    Notification.status.in_(("pending", "sending")),
+                )
+                .values(
+                    status="failed",
+                    failure_reason="Automation and notifications were disabled by the user",
+                )
+            )
         db.commit()
         db.refresh(preference)
         return preference

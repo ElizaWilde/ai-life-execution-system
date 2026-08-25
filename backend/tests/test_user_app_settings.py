@@ -71,6 +71,20 @@ def test_invalid_app_setting_is_rejected(client, user_headers):
     assert response.status_code == 422
 
 
+def test_fifteen_minute_focus_preference_is_supported(client, user_headers):
+    response = client.put(
+        "/app-settings/me",
+        headers=user_headers,
+        json={"focus_minutes": 15},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["focus_minutes"] == 15
+    assert client.get("/app-settings/me", headers=user_headers).json()[
+        "focus_minutes"
+    ] == 15
+
+
 def test_invalid_cycle_count_is_rejected(client, user_headers):
     response = client.put(
         "/app-settings/me",

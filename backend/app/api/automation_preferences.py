@@ -20,6 +20,7 @@ def _to_read(preference: AutomationPreference) -> AutomationPreferenceRead:
         id=preference.id,
         user_id=preference.user_id,
         timezone=preference.timezone,
+        automation_enabled=preference.automation_enabled,
         morning_reminder_time=preference.morning_reminder_time,
         evening_review_time=preference.evening_review_time,
         notification_channel=preference.notification_channel,

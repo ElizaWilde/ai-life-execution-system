@@ -9,7 +9,7 @@ Integration = Literal["Google Calendar", "Notion", "Telegram", "Gmail"]
 
 class UserAppSettingFields(BaseModel):
     week_start: Literal["Monday", "Sunday"] = "Monday"
-    focus_minutes: Literal[25, 45, 60] = 25
+    focus_minutes: Literal[15, 25, 45, 60] = 25
     short_break_minutes: Literal[5, 10] = 5
     long_break_minutes: Literal[15, 30] = 15
     cycle_count: int = Field(default=4, ge=1, le=12)

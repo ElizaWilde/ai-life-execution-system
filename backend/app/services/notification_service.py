@@ -99,6 +99,19 @@ class NotificationService:
     def deliver(self, db: Session, notification: Notification) -> Notification:
         if notification.status == "delivered":
             return notification
+        preference = db.scalar(
+            select(AutomationPreference).where(
+                AutomationPreference.user_id == notification.user_id
+            )
+        )
+        if preference is not None and not preference.automation_enabled:
+            notification.status = "failed"
+            notification.failure_reason = (
+                "Automation and notifications are disabled in Settings"
+            )
+            db.commit()
+            db.refresh(notification)
+            return notification
         if notification.attempt_count >= notification.max_attempts:
             raise NotificationNotRetryableError("Maximum delivery attempts reached")
 

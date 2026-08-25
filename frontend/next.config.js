@@ -5,6 +5,18 @@
 */
 const nextConfig = {
   output: "standalone",
+  async rewrites() {
+    const apiProxyTarget = (
+      process.env.INTERNAL_API_BASE_URL || "http://localhost:8000"
+    ).replace(/\/$/, "");
+
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiProxyTarget}/:path*`,
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

@@ -8,6 +8,7 @@ def test_get_creates_safe_default_preferences(client, user_headers):
     assert response.status_code == 200
     data = response.json()
     assert data["timezone"] == "Asia/Singapore"
+    assert data["automation_enabled"] is True
     assert data["morning_reminder_time"] == "08:00:00"
     assert data["evening_review_time"] == "21:00:00"
     assert data["notification_channel"] == "email"
@@ -27,6 +28,7 @@ def test_get_creates_safe_default_preferences(client, user_headers):
 def test_patch_persists_all_automation_constraints(client, user_headers):
     payload = {
         "timezone": "Europe/London",
+        "automation_enabled": False,
         "morning_reminder_time": "07:30",
         "evening_review_time": "20:45",
         "notification_channel": "telegram",
@@ -54,6 +56,7 @@ def test_patch_persists_all_automation_constraints(client, user_headers):
     assert fetched.status_code == 200
     data = fetched.json()
     assert data["timezone"] == "Europe/London"
+    assert data["automation_enabled"] is False
     assert data["notification_channel"] == "telegram"
     assert data["telegram_chat_id"] == "-1001234567890"
     assert data["automatic_rescheduling_enabled"] is True

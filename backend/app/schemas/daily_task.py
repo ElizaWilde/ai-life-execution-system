@@ -53,6 +53,7 @@ class DailyTaskBase(BaseModel):
     task_date: date
     planning_scope: PlanningScope = "daily"
     due_at: datetime | None = None
+    scheduled_start_minutes: int | None = Field(default=None, ge=0, le=1_439)
     # ge=0 and gt=0 are validation constraints(验证约束) in Pydantic Field.
     # ge means greater than or equal to. gt means greater than.
     estimated_minutes: int | None = Field(default=None, ge=0)
@@ -75,6 +76,7 @@ class DailyTaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     task_date: date | None = None
+    scheduled_start_minutes: int | None = Field(default=None, ge=0, le=1_439)
     estimated_minutes: int | None = Field(default=None, ge=0)
     channel: TaskChannel | None = None
     priority: Priority | None = None

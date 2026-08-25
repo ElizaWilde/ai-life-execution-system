@@ -16,11 +16,52 @@ def test_manually_create_daily_task(client, user_headers):
     assert response.status_code == 201
     assert response.json()["source"] == "manual"
     assert response.json()["status"] == "pending"
+    assert response.json()["scheduled_start_minutes"] is None
 
     today = client.get("/daily-tasks/today", headers=user_headers)
 
     assert today.status_code == 200
     assert [task["id"] for task in today.json()] == [response.json()["id"]]
+
+
+def test_schedule_and_resize_daily_task(client, user_headers):
+    created = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Calendar block",
+            "task_date": date.today().isoformat(),
+            "scheduled_start_minutes": 9 * 60,
+            "estimated_minutes": 60,
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["scheduled_start_minutes"] == 540
+
+    updated = client.patch(
+        f"/daily-tasks/{created.json()['id']}",
+        headers=user_headers,
+        json={"scheduled_start_minutes": 10 * 60 + 15, "estimated_minutes": 90},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["scheduled_start_minutes"] == 615
+    assert updated.json()["estimated_minutes"] == 90
+
+
+def test_task_schedule_time_must_fit_in_a_day(client, user_headers):
+    response = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Invalid calendar block",
+            "task_date": date.today().isoformat(),
+            "scheduled_start_minutes": 1440,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_get_daily_tasks_for_a_specific_date(client, user_headers):

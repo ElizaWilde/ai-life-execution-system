@@ -199,10 +199,15 @@ class AutomationScheduler:
 
         query = (
             select(Notification)
+            .join(
+                AutomationPreference,
+                AutomationPreference.user_id == Notification.user_id,
+            )
             .where(
                 Notification.status == "pending",
                 Notification.scheduled_at <= now,
                 Notification.attempt_count < Notification.max_attempts,
+                AutomationPreference.automation_enabled.is_(True),
             )
             .order_by(Notification.scheduled_at, Notification.id)
             .limit(100)
@@ -500,10 +505,12 @@ class AutomationScheduler:
         self, db: Session
     ) -> list[tuple[User, AutomationPreference]]:
         users = list(db.scalars(select(User).order_by(User.id)))
-        return [
-            (user, automation_preference_service.get_or_create(db, user.id))
-            for user in users
-        ]
+        enabled: list[tuple[User, AutomationPreference]] = []
+        for user in users:
+            preference = automation_preference_service.get_or_create(db, user.id)
+            if preference.automation_enabled:
+                enabled.append((user, preference))
+        return enabled
 
     @staticmethod
     def _tasks_for_date(db: Session, user_id: int, task_date: date) -> list[DailyTask]:

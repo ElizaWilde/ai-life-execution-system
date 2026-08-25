@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { DragEvent, FormEvent, useEffect, useState } from "react";
+import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
 import {
   api,
   DailyCheckIn,
@@ -16,9 +16,11 @@ import {
 } from "../../lib/api";
 import { useAppSettings, workloadMinutes } from "../../lib/settings";
 import { announceCheckInUpdate, subscribeToCheckInUpdates } from "../../lib/check-in-sync";
+import { subscribeToTaskUpdates } from "../../lib/task-sync";
 import { AVAILABLE_TIME_OPTIONS, availableTimeBucket } from "../../lib/check-in-options";
 import DailyReviewModule from "../../components/daily-review-module";
 import WitchHatIcon from "../../components/common/WitchHatIcon";
+import TodayCalendar from "../../components/today-calendar";
 
 type TodayIconName = "spark" | "clock" | "check" | "trash" | "sleep" | "energy" | "mood" | "calendar" | "target" | "chart" | "edit";
 
@@ -125,7 +127,7 @@ export default function TodayPage() {
     setError("");
     try {
       const [taskData, dashboardData, todayPreview, tomorrowPreview, goalData] = await Promise.all([
-        api.getTodayTasks(),
+        api.getTasksForDate(today),
         api.getTodayDashboard(),
         api.getLatestDailyPlanPreview(today),
         api.getLatestDailyPlanPreview(tomorrow),
@@ -153,7 +155,12 @@ export default function TodayPage() {
 
   useEffect(() => {
     loadToday();
-    return subscribeToCheckInUpdates(today, loadToday);
+    const unsubscribeCheckIns = subscribeToCheckInUpdates(today, loadToday);
+    const unsubscribeTasks = subscribeToTaskUpdates(loadToday);
+    return () => {
+      unsubscribeCheckIns();
+      unsubscribeTasks();
+    };
   }, [today]);
 
   useEffect(() => {
@@ -315,6 +322,23 @@ export default function TodayPage() {
       setBusy(false);
     }
   }
+
+  const updateTaskSchedule = useCallback(async (
+    task: DailyTask,
+    values: { scheduled_start_minutes: number; estimated_minutes: number },
+  ) => {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await api.updateTask(task.id, values);
+      setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setMessage(`Updated the time slot for ${task.title}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update the task time slot");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   async function saveCheckIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -551,7 +575,7 @@ export default function TodayPage() {
             onDragOver={(event) => allowTaskDrop(event, today)}
             onDrop={(event) => dropTask(event, today)}
           >
-            <div className="today-plan-heading"><div><h2>Today’s Plan</h2><span>{tasks.length} tasks</span></div></div>
+            <div className="today-plan-heading"><div><h2>Today’s Plan</h2><span>{tasks.length} tasks · includes Weekly Plan</span></div></div>
 
             <div className="today-progress-card">
               <div className="today-progress-ring"><svg viewBox="0 0 80 80"><circle className="track" cx="40" cy="40" r="34" /><circle className="value" cx="40" cy="40" r="34" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - completion / 100)} /></svg><strong>{completion}%</strong></div>
@@ -586,6 +610,20 @@ export default function TodayPage() {
             tasks={tasks}
           />
 
+          <form className="today-card daily-checkin-card today-review-checkin" onSubmit={saveCheckIn}>
+            <div className="side-card-heading"><h2>Daily Check-in</h2><span className={dashboard?.check_in ? "completed" : "pending"}>{dashboard?.check_in ? "Completed" : "Not started"}</span></div>
+            <div className="today-review-checkin-grid">
+              <label className="checkin-control"><i className="sleep"><TodayIcon name="sleep" /></i><span>Sleep</span><select value={sleepHours} onChange={(event) => setSleepHours(event.target.value)}>{sleepHourOptions.map((hours) => <option key={hours} value={String(hours)}>{sleepHourLabel(hours)}</option>)}</select></label>
+              <label className="checkin-control"><i className="energy"><TodayIcon name="energy" /></i><span>Energy</span><select value={energy} onChange={(event) => setEnergy(event.target.value as EnergyLevel)}><option value="depleted">Depleted</option><option value="low">Low</option><option value="steady">Medium</option><option value="high">High</option><option value="energized">Energized</option></select></label>
+              <label className="checkin-control"><i className="mood"><TodayIcon name="mood" /></i><span>Mood</span><select value={mood} onChange={(event) => setMood(event.target.value as MoodLevel)}><option value="struggling">Struggling</option><option value="low">Low</option><option value="neutral">Neutral</option><option value="good">Good</option><option value="great">Great</option></select></label>
+              <label className="checkin-control"><i className="calendar"><TodayIcon name="calendar" /></i><span>Available Time Today</span><select value={availableMinutes} onChange={(event) => setAvailableMinutes(event.target.value)}>{AVAILABLE_TIME_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+              <label className="checkin-control"><i className="target"><TodayIcon name="target" /></i><span>Today’s Focus</span><select value={focusMode} onChange={(event) => setFocusMode(event.target.value as NonNullable<DailyCheckIn["focus_mode"]>)}><option>Deep work</option><option>Meetings</option><option>Study</option><option>Recovery</option></select></label>
+              <label className="checkin-control"><i className="difficulty"><TodayIcon name="chart" /></i><span>Difficulty</span><select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+            </div>
+            <label className="checkin-note"><span>Note (optional)</span><textarea placeholder="How are you feeling today?" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+            <button className="update-checkin-button" disabled={busy} type="submit"><TodayIcon name="check" size={15} /> {dashboard?.check_in ? "Update Check-in" : "Save Check-in"}</button>
+          </form>
+
           <section className="today-card ai-plan-card ai-plan-main-card">
             <div className="side-card-heading"><h2>Plan Preview</h2><span>Nothing changes until you confirm</span></div><p>Preview a calibrated plan for today or tomorrow.</p>
             <div className="daily-preview-tabs">
@@ -616,18 +654,7 @@ export default function TodayPage() {
         </main>
 
         <aside className="today-side-column">
-          <form className="today-card daily-checkin-card" onSubmit={saveCheckIn}>
-            <div className="side-card-heading"><h2>Daily Check-in</h2><span className={dashboard?.check_in ? "completed" : "pending"}>{dashboard?.check_in ? "Completed" : "Not started"}</span></div>
-            <label className="checkin-control"><i className="sleep"><TodayIcon name="sleep" /></i><span>Sleep</span><select value={sleepHours} onChange={(event) => setSleepHours(event.target.value)}>{sleepHourOptions.map((hours) => <option key={hours} value={String(hours)}>{sleepHourLabel(hours)}</option>)}</select></label>
-            <label className="checkin-control"><i className="energy"><TodayIcon name="energy" /></i><span>Energy</span><select value={energy} onChange={(event) => setEnergy(event.target.value as EnergyLevel)}><option value="depleted">Depleted</option><option value="low">Low</option><option value="steady">Medium</option><option value="high">High</option><option value="energized">Energized</option></select></label>
-            <label className="checkin-control"><i className="mood"><TodayIcon name="mood" /></i><span>Mood</span><select value={mood} onChange={(event) => setMood(event.target.value as MoodLevel)}><option value="struggling">Struggling</option><option value="low">Low</option><option value="neutral">Neutral</option><option value="good">Good</option><option value="great">Great</option></select></label>
-            <label className="checkin-control"><i className="calendar"><TodayIcon name="calendar" /></i><span>Available Time Today</span><select value={availableMinutes} onChange={(event) => setAvailableMinutes(event.target.value)}>{AVAILABLE_TIME_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-            <label className="checkin-control"><i className="target"><TodayIcon name="target" /></i><span>Today’s Focus</span><select value={focusMode} onChange={(event) => setFocusMode(event.target.value as NonNullable<DailyCheckIn["focus_mode"]>)}><option>Deep work</option><option>Meetings</option><option>Study</option><option>Recovery</option></select></label>
-            <label className="checkin-control"><i className="difficulty"><TodayIcon name="chart" /></i><span>Difficulty</span><select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-            <label className="checkin-note"><span>Note (optional)</span><textarea placeholder="How are you feeling today?" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-            <button className="update-checkin-button" disabled={busy} type="submit"><TodayIcon name="check" size={15} /> {dashboard?.check_in ? "Update Check-in" : "Save Check-in"}</button>
-          </form>
-
+          <TodayCalendar busy={busy} date={today} onScheduleChange={updateTaskSchedule} tasks={tasks} />
         </aside>
       </div>
     </section>

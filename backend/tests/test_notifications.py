@@ -138,6 +138,65 @@ def test_telegram_delivery_uses_saved_chat_id(client, user_headers, monkeypatch)
     assert provider.sent[0]["recipient"] == "123456789"
 
 
+def test_disabling_automation_blocks_telegram_and_cancels_queued_messages(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    provider = FakeTelegramProvider()
+    monkeypatch.setattr(notification_service, "telegram_provider", provider)
+    configured = client.patch(
+        "/automation-preferences",
+        headers=user_headers,
+        json={
+            "notification_channel": "telegram",
+            "telegram_chat_id": "123456789",
+        },
+    )
+    queued = client.post(
+        "/notifications",
+        headers=user_headers,
+        json={
+            "notification_type": "upcoming_task",
+            "channel": "telegram",
+            "message": "This queued message must not be sent.",
+            "scheduled_at": (
+                datetime.now(timezone.utc) + timedelta(hours=2)
+            ).isoformat(),
+        },
+    )
+    disabled = client.patch(
+        "/automation-preferences",
+        headers=user_headers,
+        json={"automation_enabled": False},
+    )
+    blocked = client.post(
+        "/notifications",
+        headers=user_headers,
+        json={
+            "notification_type": "upcoming_task",
+            "channel": "telegram",
+            "message": "This immediate message must not be sent.",
+        },
+    )
+
+    assert configured.status_code == 200
+    assert queued.status_code == 201
+    assert queued.json()["status"] == "pending"
+    assert disabled.status_code == 200
+    assert disabled.json()["automation_enabled"] is False
+    assert blocked.status_code == 201
+    assert blocked.json()["status"] == "failed"
+    assert "disabled" in blocked.json()["failure_reason"].lower()
+    assert provider.sent == []
+
+    notifications = client.get("/notifications", headers=user_headers)
+    queued_after_disable = next(
+        item for item in notifications.json() if item["id"] == queued.json()["id"]
+    )
+    assert queued_after_disable["status"] == "failed"
+
+
 def test_telegram_failure_is_recorded_when_chat_id_is_missing(
     client,
     user_headers,

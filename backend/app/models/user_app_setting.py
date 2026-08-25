@@ -24,7 +24,7 @@ class UserAppSetting(Base):
     __table_args__ = (
         UniqueConstraint("user_id", name="uq_user_app_settings_user_id"),
         CheckConstraint("week_start IN ('Monday', 'Sunday')", name="ck_user_app_settings_week_start"),
-        CheckConstraint("focus_minutes IN (25, 45, 60)", name="ck_user_app_settings_focus_minutes"),
+        CheckConstraint("focus_minutes IN (15, 25, 45, 60)", name="ck_user_app_settings_focus_minutes"),
         CheckConstraint("short_break_minutes IN (5, 10)", name="ck_user_app_settings_short_break"),
         CheckConstraint("long_break_minutes IN (15, 30)", name="ck_user_app_settings_long_break"),
         CheckConstraint("cycle_count BETWEEN 1 AND 12", name="ck_user_app_settings_cycle_count"),

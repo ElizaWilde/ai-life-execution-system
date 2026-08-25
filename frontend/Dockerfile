@@ -25,9 +25,10 @@ WORKDIR /app
 
 RUN corepack enable
 
-# Public frontend environment variable
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+# Server-side destination for the same-origin /api proxy. This value is not
+# exposed to browsers; "backend" is the Compose service name.
+ARG INTERNAL_API_BASE_URL=http://backend:8000
+ENV INTERNAL_API_BASE_URL=$INTERNAL_API_BASE_URL
 
 # Reuse dependencies installed in the deps stage
 COPY --from=deps /app/node_modules ./node_modules

@@ -19,6 +19,10 @@ class DailyTask(Base):
             "planning_scope IN ('daily', 'weekly')",
             name="ck_daily_tasks_planning_scope",
         ),
+        CheckConstraint(
+            "scheduled_start_minutes IS NULL OR (scheduled_start_minutes >= 0 AND scheduled_start_minutes <= 1439)",
+            name="ck_daily_tasks_scheduled_start_minutes",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -33,6 +37,7 @@ class DailyTask(Base):
     task_date: Mapped[date] = mapped_column(Date, index=True)
     planning_scope: Mapped[str] = mapped_column(String(20), default="daily", index=True)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    scheduled_start_minutes: Mapped[int | None]
     estimated_minutes: Mapped[int | None]
     channel: Mapped[str | None] = mapped_column(String(40), index=True)
     priority: Mapped[str] = mapped_column(String(20), default="medium")

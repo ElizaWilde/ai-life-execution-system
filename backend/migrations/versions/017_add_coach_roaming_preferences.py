@@ -15,6 +15,15 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Alembic creates this column as VARCHAR(32) by default, but this revision's
+    # identifier is longer. Widen it before Alembic records the new revision.
+    op.alter_column(
+        "alembic_version",
+        "version_num",
+        existing_type=sa.String(length=32),
+        type_=sa.String(length=64),
+        existing_nullable=False,
+    )
     op.add_column(
         "user_app_settings",
         sa.Column("coach_roaming_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),

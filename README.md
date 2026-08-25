@@ -147,6 +147,23 @@ Inspect scheduler activity with:
 docker compose logs -f scheduler
 ```
 
+## Access from another device on the local network
+
+The frontend listens on all network interfaces and sends API requests through a
+same-origin `/api` proxy. After starting the Compose stack, find the host
+computer's LAN address with `ipconfig`, then open this URL on a device connected
+to the same network:
+
+```text
+http://<host-lan-ip>:3000
+```
+
+For example, if the host address is `192.168.3.30`, open
+`http://192.168.3.30:3000`. Only frontend port 3000 needs to be reachable by the
+client. If it does not connect, allow inbound TCP port 3000 on the host's private
+network firewall and verify that the Wi-Fi network does not use client/AP
+isolation.
+
 `SCHEDULER_POLL_SECONDS` controls each APScheduler interval trigger. Jobs coalesce
 missed runs, allow only one instance, and execute serially in the worker. Generated
 notifications have database-backed deduplication keys, and PostgreSQL advisory

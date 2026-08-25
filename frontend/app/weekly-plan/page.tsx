@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import {
   api,
+  DailyTask,
   MilestoneStatus,
   PhaseMilestone,
   PhasePlan,
@@ -12,8 +13,12 @@ import {
   WeekDashboard,
   WeeklyGoal,
   WeeklyPlanPreview,
+  WorkingDay,
 } from "../../lib/api";
 import WitchHatIcon from "../../components/common/WitchHatIcon";
+import PhaseTimelineCalendar from "../../components/planning/PhaseTimelineCalendar";
+import WeeklyTimelineCalendar from "../../components/weekly-timeline-calendar";
+import { subscribeToTaskUpdates } from "../../lib/task-sync";
 
 type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target" | "flag" | "clock" | "people" | "edit" | "more" | "grip";
 
@@ -59,11 +64,40 @@ function formatHours(minutes: number) {
   return `${hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)}h`;
 }
 
+function timeInputToMinutes(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return Number.NaN;
+  return hours * 60 + minutes;
+}
+
+function minutesToTimeInput(minutes: number) {
+  const bounded = Math.min(23 * 60 + 45, Math.max(0, minutes));
+  return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
+}
+
+function formatClock(minutes: number) {
+  const bounded = ((minutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hour = Math.floor(bounded / 60);
+  const minute = bounded % 60;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+
 function weekStartOf(value: string) {
   const date = dateAt(value);
   const offset = (date.getDay() + 6) % 7;
   return addDays(value, -offset);
 }
+
+const workingDayIndexes: Record<WorkingDay, number> = {
+  monday: 0,
+  tuesday: 1,
+  wednesday: 2,
+  thursday: 3,
+  friday: 4,
+  saturday: 5,
+  sunday: 6,
+};
 
 function weeklyPriorityWeight(goal: WeeklyGoal) {
   const priorityMultiplier = { high: 3, medium: 2, low: 1 }[goal.priority];
@@ -146,6 +180,15 @@ export default function WeeklyPlanPage() {
   const [goals, setGoals] = useState<WeeklyGoal[]>([]);
   const [week, setWeek] = useState<WeekDashboard | null>(null);
   const [weeklyPreview, setWeeklyPreview] = useState<WeeklyPlanPreview | null>(null);
+  const [workingDays, setWorkingDays] = useState<WorkingDay[]>(["monday", "tuesday", "wednesday", "thursday", "friday"]);
+  const [calendarTasks, setCalendarTasks] = useState<Record<string, DailyTask[]>>({});
+  const [calendarView, setCalendarView] = useState<"list" | "timeline">("list");
+  const [calendarFormDate, setCalendarFormDate] = useState<string | null>(null);
+  const [calendarTaskTitle, setCalendarTaskTitle] = useState("");
+  const [calendarTaskHours, setCalendarTaskHours] = useState("1");
+  const [calendarTaskStartTime, setCalendarTaskStartTime] = useState("09:00");
+  const [calendarTaskPriority, setCalendarTaskPriority] = useState<Priority>("medium");
+  const [calendarBusy, setCalendarBusy] = useState(false);
   const [intendedHours, setIntendedHours] = useState("20");
   const [activeTab, setActiveTab] = useState<"weekly" | "phase">("weekly");
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -178,14 +221,22 @@ export default function WeeklyPlanPage() {
     setError("");
     try {
       const selectedWeekStart = weekStartOf(anchor);
-      const [goalData, weekData, previewData] = await Promise.all([
+      const [goalData, weekData, previewData, automationPreferences, taskEntries] = await Promise.all([
         api.getGoalsForWeek(anchor),
         api.getWeekDashboard(anchor),
         api.getLatestWeeklyPlanPreview(selectedWeekStart),
+        api.getAutomationPreferences(),
+        Promise.all(Array.from({ length: 7 }, async (_, offset) => {
+          const date = addDays(selectedWeekStart, offset);
+          return [date, await api.getTasksForDate(date)] as const;
+        })),
       ]);
       setGoals(goalData);
       setWeek(weekData);
       setWeeklyPreview(previewData);
+      setWorkingDays(automationPreferences.working_days);
+      setCalendarTasks(Object.fromEntries(taskEntries));
+      setCalendarFormDate((current) => current && taskEntries.some(([date]) => date === current) ? current : null);
       if (previewData) setIntendedHours(String(previewData.intended_minutes / 60));
       else if (goalData.some((goal) => goal.target_minutes)) {
         setIntendedHours(String(goalData.reduce((sum, goal) => sum + (goal.target_minutes ?? 0), 0) / 60));
@@ -200,6 +251,8 @@ export default function WeeklyPlanPage() {
   useEffect(() => {
     loadPlan(weekAnchor);
   }, []);
+
+  useEffect(() => subscribeToTaskUpdates(() => { void loadPlan(weekAnchor); }), [weekAnchor]);
 
   useEffect(() => {
     if (activeTab === "phase") void loadPhases();
@@ -240,6 +293,29 @@ export default function WeeklyPlanPage() {
   const visiblePhases = phaseFilter === "active"
     ? phases.filter((phase) => phase.status === "active")
     : phases;
+  const workingDates = week
+    ? [...workingDays]
+      .sort((left, right) => workingDayIndexes[left] - workingDayIndexes[right])
+      .map((day) => addDays(week.week_start, workingDayIndexes[day]))
+    : [];
+  const weekDates = week
+    ? Array.from({ length: 7 }, (_, index) => addDays(week.week_start, index))
+    : [];
+  const calendarTaskDurationMinutes = Math.round((Number(calendarTaskHours) || 0) * 60);
+  const calendarTaskStartMinutes = timeInputToMinutes(calendarTaskStartTime);
+  const calendarTaskEndMinutes = calendarTaskStartMinutes + calendarTaskDurationMinutes;
+  const calendarTaskEndLabel = calendarTaskDurationMinutes > 0 && Number.isFinite(calendarTaskStartMinutes)
+    ? `${formatClock(calendarTaskEndMinutes)}${calendarTaskEndMinutes >= 24 * 60 ? " next day" : ""}`
+    : "Choose duration";
+
+  useEffect(() => {
+    const candidates = phaseFilter === "active"
+      ? phases.filter((phase) => phase.status === "active")
+      : phases;
+    setSelectedPhaseId((current) => candidates.some((phase) => phase.id === current)
+      ? current
+      : (candidates[0]?.id ?? null));
+  }, [phaseFilter, phases]);
 
   async function loadPhases(preferredId?: number) {
     setPhaseLoading(true);
@@ -534,6 +610,146 @@ export default function WeeklyPlanPage() {
     }
   }
 
+  function openCalendarTaskForm(date: string) {
+    const nextAvailableMinutes = (calendarTasks[date] ?? []).reduce((latest, task) => {
+      if (task.scheduled_start_minutes === null) return latest;
+      return Math.max(latest, task.scheduled_start_minutes + (task.estimated_minutes ?? 30));
+    }, 9 * 60);
+    setCalendarFormDate(date);
+    setCalendarTaskTitle("");
+    setCalendarTaskHours("1");
+    setCalendarTaskStartTime(minutesToTimeInput(Math.ceil(nextAvailableMinutes / 15) * 15));
+    setCalendarTaskPriority("medium");
+  }
+
+  async function refreshCalendarDate(date: string) {
+    const tasks = await api.getTasksForDate(date);
+    setCalendarTasks((current) => ({ ...current, [date]: tasks }));
+  }
+
+  async function createCalendarTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!calendarFormDate) return;
+    const estimatedMinutes = Math.round(Number(calendarTaskHours) * 60);
+    const scheduledStartMinutes = timeInputToMinutes(calendarTaskStartTime);
+    if (!Number.isFinite(estimatedMinutes) || estimatedMinutes < 15) {
+      setError("Task duration must be at least 15 minutes.");
+      return;
+    }
+    if (!Number.isFinite(scheduledStartMinutes)) {
+      setError("Choose a valid start time.");
+      return;
+    }
+    if (scheduledStartMinutes + estimatedMinutes > 24 * 60) {
+      setError("The task must end before midnight. Choose an earlier start time or shorter duration.");
+      return;
+    }
+    setCalendarBusy(true);
+    setError("");
+    try {
+      await api.createTask({
+        title: calendarTaskTitle.trim(),
+        task_date: calendarFormDate,
+        planning_scope: "weekly",
+        scheduled_start_minutes: scheduledStartMinutes,
+        estimated_minutes: estimatedMinutes,
+        priority: calendarTaskPriority,
+        source: "manual",
+      });
+      await refreshCalendarDate(calendarFormDate);
+      setMessage(`Task added to ${formatPhaseDate(calendarFormDate)}.`);
+      setCalendarFormDate(null);
+      setCalendarTaskTitle("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to add calendar task");
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function toggleCalendarTask(task: DailyTask) {
+    setCalendarBusy(true);
+    setError("");
+    try {
+      const completing = task.status !== "completed";
+      await api.updateTask(task.id, { status: completing ? "completed" : "pending" });
+      await refreshCalendarDate(task.task_date);
+      setMessage(completing ? `Completed: ${task.title}` : `Reopened: ${task.title}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update calendar task");
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function deleteCalendarTask(task: DailyTask) {
+    if (!window.confirm(`Delete "${task.title}" from ${formatPhaseDate(task.task_date)}?`)) return;
+    setCalendarBusy(true);
+    setError("");
+    try {
+      await api.deleteTask(task.id);
+      await refreshCalendarDate(task.task_date);
+      setMessage(`Deleted: ${task.title}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to delete calendar task");
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function createTimelineTask(values: {
+    title: string;
+    task_date: string;
+    scheduled_start_minutes: number;
+    estimated_minutes: number;
+    priority: Priority;
+  }) {
+    setCalendarBusy(true);
+    setError("");
+    try {
+      await api.createTask({ ...values, planning_scope: "weekly", source: "manual" });
+      await refreshCalendarDate(values.task_date);
+      setMessage(`Task added to ${formatPhaseDate(values.task_date)}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to add timeline task");
+      throw reason;
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function updateTimelineTask(task: DailyTask, values: Partial<DailyTask>) {
+    setCalendarBusy(true);
+    setError("");
+    try {
+      const updated = await api.updateTask(task.id, values);
+      await Promise.all([...new Set([task.task_date, updated.task_date])].map(refreshCalendarDate));
+      setMessage(`Updated: ${updated.title}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to update timeline task");
+      throw reason;
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function deleteTimelineTask(task: DailyTask) {
+    if (!window.confirm(`Delete "${task.title}" from ${formatPhaseDate(task.task_date)}?`)) return false;
+    setCalendarBusy(true);
+    setError("");
+    try {
+      await api.deleteTask(task.id);
+      await refreshCalendarDate(task.task_date);
+      setMessage(`Deleted: ${task.title}`);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to delete timeline task");
+      return false;
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
   async function generateWeeklyPreview() {
     if (!week) return;
     setBusy(true);
@@ -598,7 +814,7 @@ export default function WeeklyPlanPage() {
             <button className="new-phase-button" onClick={openNewPhase} type="button"><PlanIcon name="plus" size={14} /> New Phase</button>
           </div>
 
-          <section className="phase-card-grid" aria-label="Phase summaries">
+          <section className="phase-calendar-section" aria-label="Phase timelines">
             {phaseLoading && phases.length === 0 ? <p className="phase-loading-message">Loading phases…</p> : null}
             {!phaseLoading && visiblePhases.length === 0 ? (
               <div className="phase-zero-state">
@@ -608,17 +824,7 @@ export default function WeeklyPlanPage() {
                 <button onClick={openNewPhase} type="button"><PlanIcon name="plus" size={14} /> New Phase</button>
               </div>
             ) : null}
-            {visiblePhases.map((phase) => (
-              <button className={`phase-summary-card ${selectedPhaseId === phase.id ? "selected" : ""} ${phase.status === "completed" ? "completed" : ""}`} key={phase.id} onClick={() => setSelectedPhaseId(phase.id)} type="button">
-                <div className="phase-card-title"><i /><strong>{phase.title}</strong></div>
-                <div className="phase-card-meta"><span>{formatPhaseRange(phase)}</span><b className={phase.status === "active" ? "on-track" : "planning"}>{phaseStatusLabel(phase.status)}</b></div>
-                <div className="phase-progress"><span><i style={{ width: `${phase.progress}%` }} /></span><strong>{phase.progress}%</strong></div>
-                <div className="phase-card-stats">
-                  <span><PlanIcon name="flag" size={14} /> Milestones <b><PlanIcon name="people" size={13} /> {phase.milestones.filter((milestone) => milestone.status === "completed").length} / {phase.milestones.length}</b></span>
-                  <span><PlanIcon name="clock" size={14} /> Est. Focus Time <b><PlanIcon name="clock" size={13} /> {formatHours(phase.estimated_focus_minutes)}</b></span>
-                </div>
-              </button>
-            ))}
+            {visiblePhases.length > 0 ? <PhaseTimelineCalendar phases={visiblePhases} selectedPhaseId={selectedPhaseId} onSelectPhase={setSelectedPhaseId} /> : null}
           </section>
 
           {selectedPhase ? <section className="phase-detail-card">
@@ -767,6 +973,54 @@ export default function WeeklyPlanPage() {
                 <span><strong>Overall Progress</strong><small>{completedPriorities} of {goals.length} completed · weighted by priority and hours</small></span>
               </div>
             </div>
+          </section>
+
+          <section className="plan-card weekly-calendar-card" aria-labelledby="weekly-calendar-title">
+            <div className="weekly-calendar-heading">
+              <div><h2 id="weekly-calendar-title"><PlanIcon name="calendar" /> Weekly Calendar</h2><p>Your calendar follows the working days selected in Settings.</p></div>
+              <div className="weekly-calendar-view-toggle" role="group" aria-label="Weekly calendar view"><button aria-pressed={calendarView === "list"} className={calendarView === "list" ? "active" : ""} onClick={() => setCalendarView("list")} type="button">Daily list</button><button aria-pressed={calendarView === "timeline"} className={calendarView === "timeline" ? "active" : ""} onClick={() => setCalendarView("timeline")} type="button">Week timeline</button></div>
+            </div>
+            {loading ? <p className="weekly-calendar-loading">Loading calendar…</p> : null}
+            {!loading && calendarView === "list" && workingDates.length ? (
+              <div className="weekly-calendar-scroll">
+                <div className="weekly-calendar-grid" style={{ gridTemplateColumns: `repeat(${workingDates.length}, minmax(210px, 1fr))` }}>
+                  {workingDates.map((date) => {
+                    const dayTasks = [...(calendarTasks[date] ?? [])].sort(
+                      (left, right) =>
+                        (left.scheduled_start_minutes ?? Number.MAX_SAFE_INTEGER) -
+                          (right.scheduled_start_minutes ?? Number.MAX_SAFE_INTEGER) ||
+                        left.id - right.id,
+                    );
+                    const dailyPlan = week?.daily_focus.find((item) => item.date === date);
+                    const plannedMinutes = dayTasks.reduce((total, task) => total + (task.estimated_minutes ?? 0), 0);
+                    return <article className="weekly-day-column" key={date}>
+                      <header>
+                        <div><strong>{dateAt(date).toLocaleDateString("en", { weekday: "long" })}</strong><time dateTime={date}>{dateAt(date).toLocaleDateString("en", { month: "short", day: "numeric" })}</time></div>
+                        <span><PlanIcon name="clock" size={13} /> {formatHours(dailyPlan?.focus_minutes ?? 0)} / {formatHours(plannedMinutes)}</span>
+                      </header>
+                      <div className="weekly-day-tasks">
+                        {dayTasks.map((task) => <div className={`weekly-calendar-task ${task.status === "completed" ? "completed" : ""}`} key={task.id}>
+                          <div className="weekly-calendar-task-top"><strong>{task.title}</strong><small>{task.scheduled_start_minutes !== null ? `${formatClock(task.scheduled_start_minutes)}–${formatClock(task.scheduled_start_minutes + (task.estimated_minutes ?? 30))}${task.estimated_minutes ? ` · ${formatHours(task.estimated_minutes)}` : ""}` : task.estimated_minutes ? formatHours(task.estimated_minutes) : "Flexible"}</small></div>
+                          <div className="weekly-calendar-task-bottom">
+                            <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className="calendar-task-status" disabled={calendarBusy} onClick={() => toggleCalendarTask(task)} type="button"><span>{task.status === "completed" ? "Done" : "Pending"}</span><i>{task.status === "completed" ? <PlanIcon name="check" size={11} /> : null}</i></button>
+                            <b className={task.priority}>{task.priority}</b>
+                            <button aria-label={`Delete ${task.title}`} className="calendar-task-delete" disabled={calendarBusy} onClick={() => deleteCalendarTask(task)} title="Delete task" type="button"><PlanIcon name="trash" size={14} /></button>
+                          </div>
+                        </div>)}
+                        {!dayTasks.length && calendarFormDate !== date ? <p className="weekly-day-empty">No tasks planned.</p> : null}
+                      </div>
+                      {calendarFormDate === date ? <form className="weekly-calendar-task-form" onSubmit={createCalendarTask}>
+                        <input aria-label="Task title" autoFocus maxLength={255} onChange={(event) => setCalendarTaskTitle(event.target.value)} placeholder="Task title" required value={calendarTaskTitle} />
+                        <div className="weekly-calendar-time-row"><label><span>Start time</span><input aria-label="Start time" onChange={(event) => setCalendarTaskStartTime(event.target.value)} required step="900" type="time" value={calendarTaskStartTime} /></label><label><span>End time</span><output aria-label="Calculated end time">{calendarTaskEndLabel}</output></label></div>
+                        <div><label><span>Duration (hours)</span><input aria-label="Estimated hours" min="0.25" onChange={(event) => setCalendarTaskHours(event.target.value)} required step="0.25" type="number" value={calendarTaskHours} /></label><label><span>Priority</span><select aria-label="Priority" onChange={(event) => setCalendarTaskPriority(event.target.value as Priority)} value={calendarTaskPriority}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div>
+                        <footer><button disabled={calendarBusy} type="submit">Add task</button><button onClick={() => setCalendarFormDate(null)} type="button">Cancel</button></footer>
+                      </form> : <button className="weekly-day-add" disabled={calendarBusy} onClick={() => openCalendarTaskForm(date)} type="button"><PlanIcon name="plus" size={13} /> Add task</button>}
+                    </article>;
+                  })}
+                </div>
+              </div>
+            ) : null}
+            {!loading && calendarView === "timeline" && weekDates.length ? <WeeklyTimelineCalendar busy={calendarBusy} dates={weekDates} onCreate={createTimelineTask} onDelete={deleteTimelineTask} onUpdate={updateTimelineTask} tasksByDate={calendarTasks} /> : null}
           </section>
 
           <section className="plan-card adaptive-week-card">

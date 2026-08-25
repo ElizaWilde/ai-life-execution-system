@@ -31,12 +31,17 @@ def make_scheduler(provider: RecordingProvider) -> AutomationScheduler:
     )
 
 
-def add_preferences(*, automatic_rescheduling_enabled: bool = False) -> None:
+def add_preferences(
+    *,
+    automation_enabled: bool = True,
+    automatic_rescheduling_enabled: bool = False,
+) -> None:
     with TestingSessionLocal() as db:
         db.add(
             AutomationPreference(
                 user_id=1,
                 timezone="UTC",
+                automation_enabled=automation_enabled,
                 morning_reminder_time=time(8, 0),
                 evening_review_time=time(21, 0),
                 notification_channel="email",
@@ -197,3 +202,38 @@ def test_due_pending_notifications_are_delivered_without_an_api_request():
     assert notification.status == "delivered"
     assert notification.attempt_count == 1
     assert len(provider.sent) == 1
+
+
+def test_disabled_automation_does_not_generate_or_deliver_notifications():
+    add_preferences(automation_enabled=False, automatic_rescheduling_enabled=True)
+    provider = RecordingProvider()
+    scheduler = make_scheduler(provider)
+    now = datetime(2026, 7, 15, 8, 5, tzinfo=timezone.utc)
+    with TestingSessionLocal() as db:
+        db.add(
+            Notification(
+                user_id=1,
+                notification_type="upcoming_task",
+                channel="email",
+                recipient="mvp@example.com",
+                subject="Task reminder",
+                message="Start the task now.",
+                scheduled_at=now - timedelta(minutes=5),
+                status="pending",
+                attempt_count=0,
+                max_attempts=3,
+            )
+        )
+        db.commit()
+
+    result = scheduler.run_once(now)
+
+    assert result == {
+        "due_reminders": 0,
+        "morning_evening": 0,
+        "overdue_tasks": 0,
+        "procrastination": 0,
+        "completion_forecasts": 0,
+        "rescheduling_proposals": 0,
+    }
+    assert provider.sent == []

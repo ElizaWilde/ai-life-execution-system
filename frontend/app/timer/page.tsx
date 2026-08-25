@@ -143,7 +143,7 @@ export default function TimerPage() {
           const { id, user_id, created_at, updated_at, ...payload } = remote;
           await api.updateAppSettings({
             ...payload,
-            focus_minutes: Number(latest.focusMinutes) as 25 | 45 | 60,
+            focus_minutes: Number(latest.focusMinutes) as 15 | 25 | 45 | 60,
             short_break_minutes: Number(latest.shortBreak) as 5 | 10,
             long_break_minutes: Number(latest.longBreak) as 15 | 30,
             cycle_count: Math.min(12, Math.max(1, Number(latest.cycleCount) || 4)),
@@ -312,7 +312,7 @@ export default function TimerPage() {
           <article className="card timer-preferences-card">
             <h2>Timer preferences</h2>
             <div className="timer-preference-grid">
-              <label><span>Default focus session</span><i><TimerIcon name="clock" /><select disabled={Boolean(running)} value={settings.focusMinutes} onChange={(event) => updateTimerPreference("focusMinutes", event.target.value)}><option value="25">25 min</option><option value="45">45 min</option><option value="60">60 min</option></select></i></label>
+              <label><span>Default focus session</span><i><TimerIcon name="clock" /><select disabled={Boolean(running)} value={settings.focusMinutes} onChange={(event) => updateTimerPreference("focusMinutes", event.target.value)}><option value="15">15 min</option><option value="25">25 min</option><option value="45">45 min</option><option value="60">60 min</option></select></i></label>
               <label><span>Short break</span><i><TimerIcon name="clock" /><select disabled={Boolean(running)} value={settings.shortBreak} onChange={(event) => updateTimerPreference("shortBreak", event.target.value)}><option value="5">5 min</option><option value="10">10 min</option></select></i></label>
               <label><span>Long break</span><i><TimerIcon name="clock" /><select disabled={Boolean(running)} value={settings.longBreak} onChange={(event) => updateTimerPreference("longBreak", event.target.value)}><option value="15">15 min</option><option value="30">30 min</option></select></i></label>
               <label><span>Number of cycles</span><i><TimerIcon name="cycles" /><select disabled={Boolean(running)} value={settings.cycleCount} onChange={(event) => updateTimerPreference("cycleCount", event.target.value)}>{Array.from({ length: 12 }, (_, index) => index + 1).map((cycles) => <option key={cycles} value={cycles}>{cycles} {cycles === 1 ? "cycle" : "cycles"}</option>)}</select></i></label>

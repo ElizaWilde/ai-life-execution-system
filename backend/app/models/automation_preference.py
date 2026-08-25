@@ -40,6 +40,7 @@ class AutomationPreference(Base):
         index=True,
     )
     timezone: Mapped[str] = mapped_column(String(100), default="Asia/Singapore")
+    automation_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     morning_reminder_time: Mapped[time] = mapped_column(Time, default=time(8, 0))
     evening_review_time: Mapped[time] = mapped_column(Time, default=time(21, 0))
     notification_channel: Mapped[str] = mapped_column(String(20), default="email")

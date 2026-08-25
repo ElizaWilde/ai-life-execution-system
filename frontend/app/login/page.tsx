@@ -19,6 +19,7 @@ type EditableAutomationPreferences = Omit<AutomationPreferences, "id" | "user_id
 
 const defaultAutomationPreferences: EditableAutomationPreferences = {
   timezone: "Asia/Singapore",
+  automation_enabled: true,
   morning_reminder_time: "08:00",
   evening_review_time: "21:00",
   notification_channel: "email",
@@ -45,6 +46,7 @@ const workingDayOptions: { value: WorkingDay; label: string }[] = [
 function editableAutomationPreferences(value: AutomationPreferences): EditableAutomationPreferences {
   return {
     timezone: value.timezone,
+    automation_enabled: value.automation_enabled,
     morning_reminder_time: value.morning_reminder_time.slice(0, 5),
     evening_review_time: value.evening_review_time.slice(0, 5),
     notification_channel: value.notification_channel,
@@ -94,7 +96,7 @@ function backendAppSettingsPayload(
 ): Omit<UserAppSettings, "id" | "user_id" | "created_at" | "updated_at"> {
   return {
     week_start: value.weekStart as "Monday" | "Sunday",
-    focus_minutes: Number(value.focusMinutes) as 25 | 45 | 60,
+    focus_minutes: Number(value.focusMinutes) as 15 | 25 | 45 | 60,
     short_break_minutes: Number(value.shortBreak) as 5 | 10,
     long_break_minutes: Number(value.longBreak) as 15 | 30,
     cycle_count: Math.min(12, Math.max(1, Number(value.cycleCount) || 4)),
@@ -148,7 +150,6 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [message, setMessage] = useState("");
   const [automation, setAutomation] = useState<EditableAutomationPreferences>(defaultAutomationPreferences);
-  const [automationSettingsOpen, setAutomationSettingsOpen] = useState(true);
   const [savingAll, setSavingAll] = useState(false);
   const [testingEmail, setTestingEmail] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
@@ -224,6 +225,23 @@ export default function SettingsPage() {
   ) {
     setAutomation((current) => ({ ...current, [key]: value }));
     setMessage("You have unsaved settings changes.");
+  }
+
+  async function toggleAutomationEnabled() {
+    const enabled = !automation.automation_enabled;
+    try {
+      const saved = await api.updateAutomationPreferences({
+        automation_enabled: enabled,
+      });
+      setAutomation(editableAutomationPreferences(saved));
+      setMessage(
+        enabled
+          ? "Automation and notifications are enabled."
+          : "Automation and notifications are off. Queued messages will not be sent.",
+      );
+    } catch (error) {
+      setMessage(`Could not update notifications: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
   }
 
   function toggleWorkingDay(day: WorkingDay) {
@@ -362,8 +380,8 @@ export default function SettingsPage() {
           <section className="settings-card" id="integrations"><h2>Integrations</h2><div className="integration-grid">{[{ name: "Google Calendar", mark: "G", hint: "Sync your schedule and tasks." }, { name: "Notion", mark: "N", hint: "Sync tasks and notes." }, { name: "Telegram", mark: "T", hint: "Test delivery using your saved chat ID." }, { name: "Gmail", mark: "M", hint: "Test delivery to your saved profile email." }].map((item) => { const connected = settings.integrations.includes(item.name); return <article key={item.name}><i>{item.mark}</i><div><strong>{item.name}</strong><span>{item.hint}</span></div><b>›</b><span className="integration-actions"><button className={connected ? "connected" : ""} onClick={() => toggleIntegration(item.name)} type="button">{connected ? "Connected" : "Connect"}</button>{item.name === "Gmail" ? <button disabled={testingEmail} onClick={testEmailNotification} type="button">{testingEmail ? "Testing..." : "Test email"}</button> : null}{item.name === "Telegram" ? <button disabled={testingTelegram} onClick={testTelegramNotification} type="button">{testingTelegram ? "Testing..." : "Test Telegram"}</button> : null}</span></article>; })}</div></section>
 
           <section className="settings-card notifications-card" id="notifications">
-            <div className="settings-card-heading"><h2>Automation & Notifications</h2><button aria-expanded={automationSettingsOpen} aria-label={automationSettingsOpen ? "Hide automation settings" : "Show automation settings"} className={`settings-section-toggle ${automationSettingsOpen ? "on" : ""}`} onClick={() => setAutomationSettingsOpen((open) => !open)} type="button"><i /></button></div>
-            {automationSettingsOpen ? <div className="automation-settings-content">
+            <div className="settings-card-heading"><h2>Automation & Notifications</h2><button aria-label={automation.automation_enabled ? "Disable automation and notifications" : "Enable automation and notifications"} aria-pressed={automation.automation_enabled} className={`settings-section-toggle ${automation.automation_enabled ? "on" : ""}`} onClick={toggleAutomationEnabled} type="button"><i /></button></div>
+            {automation.automation_enabled ? <div className="automation-settings-content">
               <p>These saved preferences constrain future reminders and scheduling actions. Step 1 safety rules always take priority.</p>
               <div className="preference-grid">
                 <label>Morning reminder time<input type="time" value={automation.morning_reminder_time} onChange={(event) => updateAutomation("morning_reminder_time", event.target.value)} /></label>
