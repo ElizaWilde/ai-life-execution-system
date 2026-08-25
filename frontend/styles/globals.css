@@ -3119,8 +3119,7 @@ body {
 }
 
 .dashboard-day-schedule-scroll {
-  max-height: 470px;
-  overflow-y: auto;
+  overflow: visible;
   padding: 14px 12px 18px;
 }
 
@@ -3164,6 +3163,24 @@ body {
 .dashboard-day-schedule-task.completed strong { text-decoration: line-through; }
 .dashboard-day-schedule-task strong { color: #30294b; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-day-schedule-task span { color: #716a80; font-size: 8px; margin-top: 2px; }
+.dashboard-day-schedule-task span i { display: none; font-style: normal; }
+.dashboard-day-schedule-task.compact {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  padding-bottom: 4px;
+  padding-top: 4px;
+}
+.dashboard-day-schedule-task.compact strong {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.dashboard-day-schedule-task.compact span {
+  flex: 0 0 auto;
+  margin-top: 0;
+  white-space: nowrap;
+}
+.dashboard-day-schedule-task.compact span i { display: inline; margin-right: 5px; }
 
 .dashboard-schedule-now {
   align-items: center;

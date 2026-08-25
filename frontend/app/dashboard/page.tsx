@@ -761,10 +761,10 @@ export default function DashboardPage() {
               <div className="dashboard-day-schedule-grid" style={{ height: `${scheduleHeight}px` }}>
                 {scheduleHours.map((minutes) => <div className="dashboard-day-schedule-hour" key={minutes} style={{ top: `${(minutes - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}><time>{formatScheduleTime(minutes)}</time><i /></div>)}
                 {openScheduleEntries.map(({ task, start, duration }) => <article
-                  className={`dashboard-day-schedule-task ${task.priority} ${task.status === "completed" ? "completed" : ""}`}
+                  className={`dashboard-day-schedule-task ${duration * DASHBOARD_SCHEDULE_SCALE < 38 ? "compact" : ""} ${task.priority} ${task.status === "completed" ? "completed" : ""}`}
                   key={task.id}
                   style={{ height: `${Math.max(28, duration * DASHBOARD_SCHEDULE_SCALE)}px`, top: `${(start - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}
-                ><strong>{task.title}</strong><span>{formatScheduleTime(start)} – {formatScheduleTime(start + duration)}</span></article>)}
+                ><strong>{task.title}</strong><span><i aria-hidden="true">·</i>{formatScheduleTime(start)} – {formatScheduleTime(start + duration)}</span></article>)}
                 {showScheduleNow ? <div className="dashboard-schedule-now" style={{ top: `${(currentScheduleMinutes - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}><span>{formatScheduleTime(currentScheduleMinutes)}</span><i /></div> : null}
                 {scheduleLoading ? <p className="dashboard-day-schedule-empty">Loading schedule…</p> : null}
                 {!scheduleLoading && openScheduleEntries.length === 0 ? <p className="dashboard-day-schedule-empty">No tasks scheduled for this date.</p> : null}
