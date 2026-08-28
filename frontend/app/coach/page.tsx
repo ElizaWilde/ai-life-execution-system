@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { api, AutomationCommand, CoachChatMessage } from "../../lib/api";
 import { useAppSettings } from "../../lib/settings";
 import WitchHatIcon from "../../components/common/WitchHatIcon";
@@ -16,23 +16,36 @@ const SUGGESTIONS = [
   "Update weekly priority Launch target time to 4h",
 ];
 
-function looksLikeSystemCommand(message: string) {
-  const value = message.toLowerCase();
-  return [
-    /(?:^\/add_task\b|\b(?:add|create)\s+(?:a\s+)?(?:daily\s+)?task\b)/,
-    /(?:change|set|update|rename).*(?:task|weekly priority|weekly goal|phase|milestone)/,
-    /(?:complete|mark).*(?:task|done)/,
-    /(?:move|reschedule|roll over|rollover)/,
-    /(?:reduce workload|lighter week|reduce this week)/,
-    /(?:remind me|^remind )/,
-    /(?:forecast|behind this week|finish this week)/,
-    /(?:progress|how am i doing)/,
-    /(?:what should i focus|what should i do|coach me)/,
-  ].some((pattern) => pattern.test(value));
-}
-
 function CoachSpark({ size = 20 }: { size?: number }) {
   return <WitchHatIcon size={size} />;
+}
+
+function renderInlineMarkdown(value: string): ReactNode[] {
+  return value.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, index) => (
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={`${index}-${part}`}>{part.slice(2, -2)}</strong>
+      : <span key={`${index}-${part}`}>{part}</span>
+  ));
+}
+
+function FormattedCoachMessage({ content }: { content: string }) {
+  return <>{content.replace(/\r\n/g, "\n").split("\n").map((originalLine, index) => {
+    const line = originalLine.trim();
+    if (!line) return <span aria-hidden="true" className="coach-markdown-spacer" key={`space-${index}`} />;
+
+    const bullet = line.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      return <span className="coach-markdown-list-item" key={`bullet-${index}`}><i aria-hidden="true">•</i><span>{renderInlineMarkdown(bullet[1])}</span></span>;
+    }
+
+    const numbered = line.match(/^(\d+)\.\s+(.+)$/);
+    if (numbered) {
+      return <span className="coach-markdown-list-item" key={`number-${index}`}><i aria-hidden="true">{numbered[1]}.</i><span>{renderInlineMarkdown(numbered[2])}</span></span>;
+    }
+
+    const heading = line.replace(/^#{1,6}\s+/, "");
+    return <span className="coach-markdown-line" key={`line-${index}`}>{renderInlineMarkdown(heading)}</span>;
+  })}</>;
 }
 
 export default function CoachPage() {
@@ -86,13 +99,15 @@ export default function CoachPage() {
         const result = await api.rejectCommand(pendingCommand.id);
         setPendingCommand(null);
         setMessages((current) => [...current, { role: "assistant", content: result.response_message }]);
-      } else if (looksLikeSystemCommand(normalized)) {
-        const command = await api.executeCommand(normalized, crypto.randomUUID());
-        setPendingCommand(command.status === "pending_confirmation" ? command : null);
-        setMessages((current) => [...current, { role: "assistant", content: command.response_message }]);
       } else {
-        const response = await api.chatWithCoach(normalized, history);
-        setMessages((current) => [...current, { role: "assistant", content: response.reply }]);
+        const command = await api.executeCommand(normalized, crypto.randomUUID());
+        if (command.intent === "unknown" && !command.parameters_json.clarification_question) {
+          const response = await api.chatWithCoach(normalized, history);
+          setMessages((current) => [...current, { role: "assistant", content: response.reply }]);
+        } else {
+          setPendingCommand(command.status === "pending_confirmation" ? command : null);
+          setMessages((current) => [...current, { role: "assistant", content: command.response_message }]);
+        }
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The coach could not respond. Please try again.");
@@ -141,11 +156,23 @@ export default function CoachPage() {
         <div aria-live="polite" className="coach-conversation">
           {messages.map((message, index) => (
             <article className={`coach-message ${message.role}`} key={`${message.role}-${index}-${message.content.slice(0, 16)}`}>
-              {message.role === "assistant" ? <span className="coach-avatar"><CoachSpark size={17} /></span> : <span className="coach-user-avatar">{settings.name.slice(0, 1).toUpperCase() || "Y"}</span>}
-              <div><small>{message.role === "assistant" ? "AI Coach" : "You"}</small><p>{message.content}</p></div>
+              {message.role === "assistant" ? <span className="coach-avatar"><CoachSpark size={17} /></span> : <span className={`coach-user-avatar ${settings.avatarDataUrl ? "has-image" : ""}`} style={settings.avatarDataUrl ? { backgroundImage: `url(${settings.avatarDataUrl})` } : undefined}>{settings.avatarDataUrl ? "" : settings.name.slice(0, 1).toUpperCase() || "Y"}</span>}
+              <div><small>{message.role === "assistant" ? "AI Coach" : "You"}</small><p><FormattedCoachMessage content={message.content} /></p></div>
             </article>
           ))}
-          {busy ? <article className="coach-message assistant coach-typing"><span className="coach-avatar"><CoachSpark size={17} /></span><div><small>AI Coach</small><p><i /><i /><i /></p></div></article> : null}
+          {busy ? <article className="coach-message assistant coach-typing"><span className="coach-avatar"><CoachSpark size={17} /></span><div><small>AI Coach</small><p aria-label="AI Coach is thinking">
+            <svg aria-hidden="true" className="coach-cat-loader" viewBox="0 0 120 64">
+              <path className="coach-cat-leg coach-cat-leg-a" d="M45 37 L39 55" />
+              <path className="coach-cat-leg coach-cat-leg-b" d="M57 39 L62 56" />
+              <path className="coach-cat-leg coach-cat-leg-a" d="M72 39 L66 56" />
+              <path className="coach-cat-leg coach-cat-leg-b" d="M84 36 L90 53" />
+              <path className="coach-cat-tail" d="M35 31 C17 30 21 12 8 16" />
+              <ellipse className="coach-cat-body" cx="62" cy="31" rx="31" ry="17" />
+              <ellipse className="coach-cat-body" cx="91" cy="25" rx="17" ry="15" />
+              <path className="coach-cat-body" d="M78 16 L83 3 L91 14 L102 5 L103 21 Z" />
+              <path className="coach-cat-detail" d="M95 24 Q99 20 103 24 M103 29 L113 27 M103 31 L114 32" />
+            </svg>
+          </p></div></article> : null}
           <div ref={conversationEnd} />
         </div>
 
@@ -162,7 +189,21 @@ export default function CoachPage() {
         {error ? <div className="coach-chat-error">{error}</div> : null}
 
         <form className="coach-composer" onSubmit={submitMessage}>
-          <textarea aria-label="Message your AI coach" disabled={busy} maxLength={20000} onChange={(event) => setDraft(event.target.value)} placeholder="Message your AI coach…" rows={2} value={draft} />
+          <textarea
+            aria-label="Message your AI coach"
+            disabled={busy}
+            maxLength={20000}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder="Message your AI coach…"
+            rows={2}
+            value={draft}
+          />
           <div><span>Conversation is kept for this browser session.</span><button disabled={busy || !draft.trim()} type="submit"><CoachSpark size={16} /> {busy ? "Thinking…" : "Send"}</button></div>
         </form>
       </div>

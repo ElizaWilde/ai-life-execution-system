@@ -1,7 +1,19 @@
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
+
 from app.models import ReschedulingProposal
+from app.services.coordinator_service import coordinator_service
 from conftest import TestingSessionLocal
+
+
+@pytest.fixture(autouse=True)
+def stub_semantic_interpreter(monkeypatch):
+    """Existing command tests exercise validation/execution independently of the LLM."""
+    async def interpret(db, user, message):
+        return coordinator_service.classify(db, user.id, message)
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
 
 
 def test_read_only_command_executes_and_is_idempotent(client, user_headers):
@@ -57,6 +69,164 @@ def test_create_today_task_requires_confirmation(client, user_headers):
     assert created["priority"] == "high"
     assert created["channel"] == "study"
     assert created["source"] == "ai"
+
+
+def test_natural_language_task_interpretation_preserves_schedule(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    async def interpret(_db, _user, _message):
+        return "create_task", {
+            "title": "fix coach",
+            "description": None,
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 90,
+            "scheduled_start_minutes": 15 * 60,
+            "channel": None,
+            "priority": "medium",
+            "weekly_goal_id": None,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "natural-create-task-command"},
+        json={"message": "i want to add a 90mins task to fix coach at 3:00"},
+    )
+
+    assert command.status_code == 200
+    assert command.json()["intent"] == "create_task"
+    assert command.json()["parameters_json"]["scheduled_start_minutes"] == 900
+    assert "at 15:00" in command.json()["response_message"]
+
+    confirmed = client.post(
+        f"/coordinator/commands/{command.json()['id']}/confirm",
+        headers=user_headers,
+    )
+    assert confirmed.status_code == 200
+    tasks = client.get("/daily-tasks/today", headers=user_headers).json()
+    created = next(item for item in tasks if item["title"] == "fix coach")
+    assert created["estimated_minutes"] == 90
+    assert created["scheduled_start_minutes"] == 900
+
+
+def test_task_interpretation_is_blocked_by_schedule_conflict(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    existing = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Existing focus block",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 60,
+            "scheduled_start_minutes": 900,
+        },
+    ).json()
+
+    async def interpret(_db, _user, _message):
+        return "create_task", {
+            "title": "Fix coach conflict handling",
+            "description": None,
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 45,
+            "scheduled_start_minutes": 900,
+            "channel": None,
+            "priority": "medium",
+            "weekly_goal_id": None,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "schedule-conflict-command"},
+        json={"message": "Add another task at 15:00"},
+    ).json()
+
+    assert command["status"] == "failed"
+    assert command["requires_confirmation"] is False
+    assert command["result_json"]["decision"]["code"] == "schedule_conflict"
+    assert "Existing focus block” (15:00–16:00)" in command["response_message"]
+    tasks = client.get("/daily-tasks/today", headers=user_headers).json()
+    assert any(task["id"] == existing["id"] for task in tasks)
+    assert all(task["title"] != "Fix coach conflict handling" for task in tasks)
+
+
+def test_task_interpretation_is_blocked_by_normalized_duplicate_name(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Fix Coach",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 30,
+        },
+    )
+
+    async def interpret(_db, _user, _message):
+        return "create_task", {
+            "title": "  fix   coach ",
+            "description": None,
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 45,
+            "scheduled_start_minutes": 1020,
+            "channel": None,
+            "priority": "medium",
+            "weekly_goal_id": None,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "duplicate-name-command"},
+        json={"message": "Add fix coach again"},
+    ).json()
+
+    assert command["status"] == "failed"
+    assert command["result_json"]["decision"]["code"] == "duplicate_task_name"
+    assert "already exists" in command["response_message"]
+
+
+def test_adjacent_task_time_is_not_a_conflict(client, user_headers, monkeypatch):
+    client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "First focus block",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 60,
+            "scheduled_start_minutes": 900,
+        },
+    )
+
+    async def interpret(_db, _user, _message):
+        return "create_task", {
+            "title": "Second focus block",
+            "description": None,
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 30,
+            "scheduled_start_minutes": 960,
+            "channel": None,
+            "priority": "medium",
+            "weekly_goal_id": None,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "adjacent-time-command"},
+        json={"message": "Add another task at 16:00"},
+    ).json()
+
+    assert command["status"] == "pending_confirmation"
+    assert command["requires_confirmation"] is True
 
 
 def test_slash_create_task_can_be_rejected(client, user_headers):
@@ -152,6 +322,94 @@ def test_change_task_duration_requires_confirmation(client, user_headers):
     assert confirmed.json()["result_json"]["estimated_minutes"] == 120
     after = client.get("/daily-tasks/today", headers=user_headers).json()
     assert next(item for item in after if item["id"] == task["id"])["estimated_minutes"] == 120
+
+
+def test_change_task_duration_is_blocked_when_it_creates_overlap(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    first = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "First scheduled task",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 30,
+            "scheduled_start_minutes": 900,
+        },
+    ).json()
+    second = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Second scheduled task",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 30,
+            "scheduled_start_minutes": 960,
+        },
+    ).json()
+
+    async def interpret(_db, _user, _message):
+        return "change_task_duration", {
+            "query": first["title"],
+            "daily_task_id": first["id"],
+            "title": first["title"],
+            "current_minutes": 30,
+            "proposed_minutes": 90,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "duration-overlap-command"},
+        json={"message": "Make the first task 90 minutes"},
+    ).json()
+
+    assert command["status"] == "failed"
+    assert command["result_json"]["decision"]["code"] == "schedule_conflict"
+    assert second["title"] in command["response_message"]
+
+
+def test_task_rename_is_blocked_when_name_would_duplicate(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    existing = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={"title": "Canonical task", "task_date": date.today().isoformat()},
+    ).json()
+    renamed = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={"title": "Temporary task", "task_date": date.today().isoformat()},
+    ).json()
+
+    async def interpret(_db, _user, _message):
+        return "update_content", {
+            "resource_type": "daily_task",
+            "resource_label": "task",
+            "resource_id": renamed["id"],
+            "query": renamed["title"],
+            "title": renamed["title"],
+            "field_label": "title",
+            "changes": {"title": "  canonical   TASK "},
+            "current_value": renamed["title"],
+            "new_value": "canonical TASK",
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "rename-duplicate-command"},
+        json={"message": "Rename temporary task to canonical task"},
+    ).json()
+
+    assert command["status"] == "failed"
+    assert command["result_json"]["decision"]["code"] == "duplicate_task_name"
+    assert existing["title"] in command["response_message"] or "already exists" in command["response_message"]
 
 
 def test_update_today_task_content_requires_confirmation(client, user_headers):

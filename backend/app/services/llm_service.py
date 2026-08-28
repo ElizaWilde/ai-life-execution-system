@@ -6,13 +6,19 @@ Responsible for:
     Return structured JSON
 '''
 import json
+from typing import TypeVar
+
 import httpx
+from pydantic import BaseModel, ValidationError
 
 from app.config import settings
 
 
 class LLMResponseError(ValueError):
     """Raised when Ollama returns a response that violates the requested shape."""
+
+
+StructuredResponse = TypeVar("StructuredResponse", bound=BaseModel)
 
 
 class LLMService:
@@ -56,12 +62,90 @@ class LLMService:
 
         return result
 
+    async def generate_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[StructuredResponse],
+    ) -> StructuredResponse:
+        """Constrain model output with JSON Schema, then validate it with Pydantic."""
+        raw = await self._request_chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=response_model.model_json_schema(),
+        )
+        try:
+            return response_model.model_validate_json(raw)
+        except ValidationError as exc:
+            raise LLMResponseError(
+                f"Ollama returned data that does not match {response_model.__name__}"
+            ) from exc
+
+    async def call_structured_tool(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[StructuredResponse],
+        *,
+        tool_name: str,
+        tool_description: str,
+    ) -> StructuredResponse:
+        """Require a named model tool call and validate its arguments with Pydantic."""
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": tool_description,
+                        "parameters": response_model.model_json_schema(),
+                    },
+                }
+            ],
+        }
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+
+        try:
+            tool_calls = response.json()["message"]["tool_calls"]
+            call = next(
+                item for item in tool_calls
+                if item.get("function", {}).get("name") == tool_name
+            )
+            arguments = call["function"]["arguments"]
+        except (KeyError, TypeError, StopIteration) as exc:
+            raise LLMResponseError(f"Ollama did not call the required {tool_name} tool") from exc
+
+        try:
+            if isinstance(arguments, str):
+                return response_model.model_validate_json(arguments)
+            return response_model.model_validate(arguments)
+        except ValidationError as exc:
+            raise LLMResponseError(
+                f"Ollama tool arguments do not match {response_model.__name__}"
+            ) from exc
+
     async def _request_chat(
         self,
         system_prompt: str,
         user_prompt: str,
         history: list[dict[str, str]] | None = None,
-        response_format: str | None = None,
+        response_format: str | dict | None = None,
     ) -> str:
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(history or [])

@@ -11,6 +11,7 @@ from app.models import AutomationCommand, User
 from app.schemas.command import CommandRead, CommandRequest
 from app.schemas.coordinator import CoordinatorChatRequest, CoordinatorChatResponse
 from app.services.coordinator_service import coordinator_service
+from app.services.llm_service import LLMResponseError
 
 
 router = APIRouter()
@@ -54,19 +55,25 @@ async def chat(
 
 
 @router.post("/commands", response_model=CommandRead)
-def execute_command(
+async def execute_command(
     payload: CommandRequest,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> AutomationCommand:
     try:
-        return coordinator_service.process_command(
+        return await coordinator_service.process_command(
             db,
             user,
             payload.message,
             idempotency_key=idempotency_key,
         )
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail="Command interpreter request was rejected") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Command interpreter request failed") from exc
+    except LLMResponseError as exc:
+        raise HTTPException(status_code=502, detail="Command interpreter returned invalid data") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

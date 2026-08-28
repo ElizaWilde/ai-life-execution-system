@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   api,
   DailyTask,
@@ -21,6 +21,17 @@ import WeeklyTimelineCalendar from "../../components/weekly-timeline-calendar";
 import { subscribeToTaskUpdates } from "../../lib/task-sync";
 
 type PlanIconName = "spark" | "calendar" | "chart" | "check" | "trash" | "arrow" | "plus" | "target" | "flag" | "clock" | "people" | "edit" | "more" | "grip";
+
+type WeeklyListDrag = {
+  taskId: number;
+  pointerId: number;
+  originX: number;
+  originY: number;
+  deltaX: number;
+  deltaY: number;
+  originalDate: string;
+  targetDate: string;
+};
 
 function PlanIcon({ name, size = 17 }: { name: PlanIconName; size?: number }) {
   if (name === "spark") return <WitchHatIcon size={size} />;
@@ -189,6 +200,8 @@ export default function WeeklyPlanPage() {
   const [calendarTaskStartTime, setCalendarTaskStartTime] = useState("09:00");
   const [calendarTaskPriority, setCalendarTaskPriority] = useState<Priority>("medium");
   const [calendarBusy, setCalendarBusy] = useState(false);
+  const [weeklyListDrag, setWeeklyListDrag] = useState<WeeklyListDrag | null>(null);
+  const weeklyListDragRef = useRef<WeeklyListDrag | null>(null);
   const [intendedHours, setIntendedHours] = useState("20");
   const [activeTab, setActiveTab] = useState<"weekly" | "phase">("weekly");
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -697,6 +710,122 @@ export default function WeeklyPlanPage() {
     }
   }
 
+  async function moveCalendarTaskToDate(task: DailyTask, targetDate: string) {
+    if (calendarBusy || targetDate === task.task_date) return;
+    const sourceDate = task.task_date;
+    const optimisticTask = { ...task, task_date: targetDate };
+    setCalendarBusy(true);
+    setError("");
+    setCalendarTasks((current) => ({
+      ...current,
+      [sourceDate]: (current[sourceDate] ?? []).filter((item) => item.id !== task.id),
+      [targetDate]: [...(current[targetDate] ?? []).filter((item) => item.id !== task.id), optimisticTask],
+    }));
+    try {
+      await api.updateTask(task.id, { task_date: targetDate });
+      await Promise.all([refreshCalendarDate(sourceDate), refreshCalendarDate(targetDate)]);
+      setMessage(`Moved ${task.title} to ${formatPhaseDate(targetDate)}.`);
+    } catch (reason) {
+      await Promise.all([refreshCalendarDate(sourceDate), refreshCalendarDate(targetDate)]);
+      setError(reason instanceof Error ? reason.message : "Failed to move calendar task");
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  function beginWeeklyListDrag(event: React.PointerEvent<HTMLDivElement>, task: DailyTask) {
+    if (calendarBusy || (event.target as HTMLElement).closest("button")) return;
+    if (event.pointerType !== "mouse") event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const next = {
+      taskId: task.id,
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      originY: event.clientY,
+      deltaX: 0,
+      deltaY: 0,
+      originalDate: task.task_date,
+      targetDate: task.task_date,
+    };
+    weeklyListDragRef.current = next;
+    setWeeklyListDrag(next);
+  }
+
+  function beginWeeklyListMouseDrag(event: React.MouseEvent<HTMLDivElement>, task: DailyTask) {
+    if (calendarBusy || (event.target as HTMLElement).closest("button")) return;
+    event.preventDefault();
+    const next = {
+      taskId: task.id,
+      pointerId: -2,
+      originX: event.clientX,
+      originY: event.clientY,
+      deltaX: 0,
+      deltaY: 0,
+      originalDate: task.task_date,
+      targetDate: task.task_date,
+    };
+    weeklyListDragRef.current = next;
+    setWeeklyListDrag(next);
+    const moveMouseDrag = (nativeEvent: MouseEvent) => {
+      updateWeeklyListDragPosition(nativeEvent.clientX, nativeEvent.clientY);
+    };
+    const stopTracking = () => {
+      window.removeEventListener("mousemove", moveMouseDrag);
+      window.removeEventListener("mouseup", finishMouseDrag);
+      window.removeEventListener("blur", cancelMouseDrag);
+    };
+    const finishMouseDrag = (nativeEvent: MouseEvent) => {
+      stopTracking();
+      const current = updateWeeklyListDragPosition(nativeEvent.clientX, nativeEvent.clientY) ?? weeklyListDragRef.current;
+      cancelWeeklyListDrag();
+      if (current && current.targetDate !== current.originalDate) void moveCalendarTaskToDate(task, current.targetDate);
+    };
+    const cancelMouseDrag = () => {
+      stopTracking();
+      cancelWeeklyListDrag();
+    };
+    window.addEventListener("mousemove", moveMouseDrag);
+    window.addEventListener("mouseup", finishMouseDrag, { once: true });
+    window.addEventListener("blur", cancelMouseDrag, { once: true });
+  }
+
+  function updateWeeklyListDragPosition(clientX: number, clientY: number) {
+    const current = weeklyListDragRef.current;
+    if (!current) return null;
+    const targetColumn = Array.from(document.querySelectorAll<HTMLElement>("[data-weekly-drop-date]")).find((column) => {
+      const rect = column.getBoundingClientRect();
+      return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    });
+    const next = {
+      ...current,
+      deltaX: clientX - current.originX,
+      deltaY: clientY - current.originY,
+      targetDate: targetColumn?.dataset.weeklyDropDate ?? current.originalDate,
+    };
+    weeklyListDragRef.current = next;
+    setWeeklyListDrag(next);
+    return next;
+  }
+
+  function moveWeeklyListDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const current = weeklyListDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    updateWeeklyListDragPosition(event.clientX, event.clientY);
+  }
+
+  function cancelWeeklyListDrag() {
+    weeklyListDragRef.current = null;
+    setWeeklyListDrag(null);
+  }
+
+  function finishWeeklyListDrag(event: React.PointerEvent<HTMLDivElement>, task: DailyTask) {
+    const current = updateWeeklyListDragPosition(event.clientX, event.clientY) ?? weeklyListDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    cancelWeeklyListDrag();
+    if (current.targetDate !== current.originalDate) void moveCalendarTaskToDate(task, current.targetDate);
+  }
+
   async function createTimelineTask(values: {
     title: string;
     task_date: string;
@@ -993,13 +1122,36 @@ export default function WeeklyPlanPage() {
                     );
                     const dailyPlan = week?.daily_focus.find((item) => item.date === date);
                     const plannedMinutes = dayTasks.reduce((total, task) => total + (task.estimated_minutes ?? 0), 0);
-                    return <article className="weekly-day-column" key={date}>
+                    return <article
+                      className={`weekly-day-column ${weeklyListDrag && weeklyListDrag.targetDate === date && weeklyListDrag.originalDate !== date ? "drop-target" : ""}`}
+                      data-weekly-drop-date={date}
+                      key={date}
+                    >
                       <header>
                         <div><strong>{dateAt(date).toLocaleDateString("en", { weekday: "long" })}</strong><time dateTime={date}>{dateAt(date).toLocaleDateString("en", { month: "short", day: "numeric" })}</time></div>
                         <span><PlanIcon name="clock" size={13} /> {formatHours(dailyPlan?.focus_minutes ?? 0)} / {formatHours(plannedMinutes)}</span>
                       </header>
                       <div className="weekly-day-tasks">
-                        {dayTasks.map((task) => <div className={`weekly-calendar-task ${task.status === "completed" ? "completed" : ""}`} key={task.id}>
+                        {dayTasks.map((task) => <div
+                          aria-label={`${task.title}. Drag to another day, or use Left and Right arrow keys.`}
+                          className={`weekly-calendar-task ${task.status === "completed" ? "completed" : ""} ${weeklyListDrag?.taskId === task.id ? "dragging" : ""}`}
+                          key={task.id}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+                            event.preventDefault();
+                            const currentIndex = workingDates.indexOf(task.task_date);
+                            const targetIndex = Math.min(workingDates.length - 1, Math.max(0, currentIndex + (event.key === "ArrowLeft" ? -1 : 1)));
+                            if (targetIndex !== currentIndex) void moveCalendarTaskToDate(task, workingDates[targetIndex]);
+                          }}
+                          onMouseDown={(event) => beginWeeklyListMouseDrag(event, task)}
+                          onPointerCancel={cancelWeeklyListDrag}
+                          onPointerDown={(event) => beginWeeklyListDrag(event, task)}
+                          onPointerMove={moveWeeklyListDrag}
+                          onPointerUp={(event) => finishWeeklyListDrag(event, task)}
+                          style={weeklyListDrag?.taskId === task.id ? { transform: `translate(${weeklyListDrag.deltaX}px, ${weeklyListDrag.deltaY}px)` } : undefined}
+                          tabIndex={0}
+                          title="Drag this task to another day"
+                        >
                           <div className="weekly-calendar-task-top"><strong>{task.title}</strong><small>{task.scheduled_start_minutes !== null ? `${formatClock(task.scheduled_start_minutes)}–${formatClock(task.scheduled_start_minutes + (task.estimated_minutes ?? 30))}${task.estimated_minutes ? ` · ${formatHours(task.estimated_minutes)}` : ""}` : task.estimated_minutes ? formatHours(task.estimated_minutes) : "Flexible"}</small></div>
                           <div className="weekly-calendar-task-bottom">
                             <button aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Complete ${task.title}`} className="calendar-task-status" disabled={calendarBusy} onClick={() => toggleCalendarTask(task)} type="button"><span>{task.status === "completed" ? "Done" : "Pending"}</span><i>{task.status === "completed" ? <PlanIcon name="check" size={11} /> : null}</i></button>

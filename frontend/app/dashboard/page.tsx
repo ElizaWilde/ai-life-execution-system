@@ -43,6 +43,16 @@ type PersistentTimerState = {
   studySessionId: number | null;
 };
 
+type DashboardScheduleDrag = {
+  taskId: number;
+  pointerId: number;
+  originY: number;
+  originalStart: number;
+  start: number;
+  duration: number;
+  moved: boolean;
+};
+
 function durationForMode(mode: TimerMode, durations: TimerDurations) {
   if (mode === "focus") return durations.focus;
   return mode === "longBreak" ? durations.longBreak : durations.shortBreak;
@@ -209,6 +219,9 @@ export default function DashboardPage() {
   const [openScheduleDate, setOpenScheduleDate] = useState<string | null>(null);
   const [openScheduleTasks, setOpenScheduleTasks] = useState<DailyTask[]>([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleSavingId, setScheduleSavingId] = useState<number | null>(null);
+  const [scheduleDrag, setScheduleDrag] = useState<DashboardScheduleDrag | null>(null);
+  const scheduleDragRef = useRef<DashboardScheduleDrag | null>(null);
   const [calendarNow, setCalendarNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -612,6 +625,60 @@ export default function DashboardPage() {
     }
   }
 
+  async function updateScheduleTaskStart(task: DailyTask, start: number) {
+    if (scheduleSavingId !== null || start === task.scheduled_start_minutes) return;
+    const previousStart = task.scheduled_start_minutes;
+    setScheduleSavingId(task.id);
+    setOpenScheduleTasks((current) => current.map((item) => item.id === task.id ? { ...item, scheduled_start_minutes: start } : item));
+    try {
+      const updated = await api.updateTask(task.id, { scheduled_start_minutes: start });
+      setOpenScheduleTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+      await refreshPlanStats();
+      setError("");
+    } catch (reason) {
+      setOpenScheduleTasks((current) => current.map((item) => item.id === task.id ? { ...item, scheduled_start_minutes: previousStart } : item));
+      setError(reason instanceof Error ? reason.message : "Could not move the task");
+    } finally {
+      setScheduleSavingId(null);
+    }
+  }
+
+  function beginScheduleDrag(event: React.PointerEvent<HTMLElement>, task: DailyTask, start: number, duration: number) {
+    if (scheduleSavingId !== null || scheduleLoading) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const next = { taskId: task.id, pointerId: event.pointerId, originY: event.clientY, originalStart: start, start, duration, moved: false };
+    scheduleDragRef.current = next;
+    setScheduleDrag(next);
+  }
+
+  function moveScheduleDrag(event: React.PointerEvent<HTMLElement>) {
+    const current = scheduleDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const minuteDelta = Math.round(((event.clientY - current.originY) / DASHBOARD_SCHEDULE_SCALE) / 15) * 15;
+    const latestStart = Math.min(
+      Math.max(current.originalStart + minuteDelta, DASHBOARD_DAY_START),
+      Math.max(DASHBOARD_DAY_START, DASHBOARD_DAY_END - current.duration),
+    );
+    if (latestStart === current.start) return;
+    const next = { ...current, start: latestStart, moved: latestStart !== current.originalStart };
+    scheduleDragRef.current = next;
+    setScheduleDrag(next);
+  }
+
+  function cancelScheduleDrag() {
+    scheduleDragRef.current = null;
+    setScheduleDrag(null);
+  }
+
+  function finishScheduleDrag(event: React.PointerEvent<HTMLElement>, task: DailyTask) {
+    const current = scheduleDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    cancelScheduleDrag();
+    if (current.moved) void updateScheduleTaskStart(task, current.start);
+  }
+
   return (
     <section className="life-dashboard">
       <header className="life-hero">
@@ -760,11 +827,28 @@ export default function DashboardPage() {
             <div className="dashboard-day-schedule-scroll">
               <div className="dashboard-day-schedule-grid" style={{ height: `${scheduleHeight}px` }}>
                 {scheduleHours.map((minutes) => <div className="dashboard-day-schedule-hour" key={minutes} style={{ top: `${(minutes - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}><time>{formatScheduleTime(minutes)}</time><i /></div>)}
-                {openScheduleEntries.map(({ task, start, duration }) => <article
-                  className={`dashboard-day-schedule-task ${duration * DASHBOARD_SCHEDULE_SCALE < 38 ? "compact" : ""} ${task.priority} ${task.status === "completed" ? "completed" : ""}`}
-                  key={task.id}
-                  style={{ height: `${Math.max(28, duration * DASHBOARD_SCHEDULE_SCALE)}px`, top: `${(start - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}
-                ><strong>{task.title}</strong><span><i aria-hidden="true">·</i>{formatScheduleTime(start)} – {formatScheduleTime(start + duration)}</span></article>)}
+                {openScheduleEntries.map(({ task, start, duration }) => {
+                  const displayedStart = scheduleDrag?.taskId === task.id ? scheduleDrag.start : start;
+                  return <article
+                    aria-label={`${task.title}, ${formatScheduleTime(displayedStart)} to ${formatScheduleTime(displayedStart + duration)}. Drag up or down to change time.`}
+                    className={`dashboard-day-schedule-task ${duration * DASHBOARD_SCHEDULE_SCALE < 38 ? "compact" : ""} ${task.priority} ${task.status === "completed" ? "completed" : ""} ${scheduleDrag?.taskId === task.id ? "dragging" : ""} ${scheduleSavingId === task.id ? "saving" : ""}`}
+                    key={task.id}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                      event.preventDefault();
+                      const step = event.key === "ArrowUp" ? -15 : 15;
+                      const nextStart = Math.min(Math.max(start + step, DASHBOARD_DAY_START), Math.max(DASHBOARD_DAY_START, DASHBOARD_DAY_END - duration));
+                      void updateScheduleTaskStart(task, nextStart);
+                    }}
+                    onPointerCancel={cancelScheduleDrag}
+                    onPointerDown={(event) => beginScheduleDrag(event, task, start, duration)}
+                    onPointerMove={moveScheduleDrag}
+                    onPointerUp={(event) => finishScheduleDrag(event, task)}
+                    style={{ height: `${Math.max(28, duration * DASHBOARD_SCHEDULE_SCALE)}px`, top: `${(displayedStart - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}
+                    tabIndex={0}
+                    title="Drag up or down to change the start time"
+                  ><strong>{task.title}</strong><span><i aria-hidden="true">·</i>{formatScheduleTime(displayedStart)} – {formatScheduleTime(displayedStart + duration)}</span></article>;
+                })}
                 {showScheduleNow ? <div className="dashboard-schedule-now" style={{ top: `${(currentScheduleMinutes - DASHBOARD_DAY_START) * DASHBOARD_SCHEDULE_SCALE}px` }}><span>{formatScheduleTime(currentScheduleMinutes)}</span><i /></div> : null}
                 {scheduleLoading ? <p className="dashboard-day-schedule-empty">Loading schedule…</p> : null}
                 {!scheduleLoading && openScheduleEntries.length === 0 ? <p className="dashboard-day-schedule-empty">No tasks scheduled for this date.</p> : null}

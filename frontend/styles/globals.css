@@ -2101,12 +2101,18 @@ body {
 
 .sidebar-user {
   align-items: center;
+  color: inherit;
+  cursor: pointer;
   display: grid;
   gap: 10px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   margin-top: auto;
   padding: 16px 10px 0;
+  text-decoration: none;
 }
+
+.sidebar-user:hover strong { color: #6938e6; }
+.sidebar-user:focus-visible { border-radius: 10px; outline: 2px solid #7244e8; outline-offset: 3px; }
 
 .user-avatar {
   align-items: center;
@@ -2120,6 +2126,14 @@ body {
   height: 40px;
   justify-content: center;
   width: 40px;
+}
+
+.user-avatar.has-image,
+.coach-user-avatar.has-image {
+  background-color: #e7e9ef;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 .sidebar-user div {
@@ -3153,8 +3167,14 @@ body {
   padding: 5px 9px;
   position: absolute;
   right: 8px;
+  touch-action: none;
+  user-select: none;
   z-index: 2;
 }
+.dashboard-day-schedule-task { cursor: grab; }
+.dashboard-day-schedule-task:focus-visible { outline: 2px solid #7047e8; outline-offset: 2px; }
+.dashboard-day-schedule-task.dragging { box-shadow: 0 8px 20px rgba(67, 42, 132, .22); cursor: grabbing; opacity: .88; transition: none; z-index: 5; }
+.dashboard-day-schedule-task.saving { cursor: wait; opacity: .68; }
 
 .dashboard-day-schedule-task.high,
 .dashboard-day-schedule-task.urgent { background: #fff0ee; border-color: #f3c8c2; border-left-color: #e25d52; }
@@ -8569,7 +8589,8 @@ html[data-theme="dark"] .sidebar .nav-link:not(.active) {
 .weekly-calendar-loading { color: #778197; font-size: 13px; margin: 0; padding: 18px 0; }
 .weekly-calendar-scroll { overflow-x: auto; padding-bottom: 5px; }
 .weekly-calendar-grid { display: grid; gap: 12px; min-width: max-content; }
-.weekly-day-column { display: flex; flex-direction: column; min-width: 210px; }
+.weekly-day-column { border-radius: 9px; display: flex; flex-direction: column; min-width: 210px; transition: background-color .15s ease, box-shadow .15s ease; }
+.weekly-day-column.drop-target { background: rgba(109, 61, 232, .075); box-shadow: 0 0 0 2px #8a66eb; }
 .weekly-day-column > header { display: grid; gap: 10px; margin-bottom: 10px; }
 .weekly-day-column > header > div { display: grid; gap: 4px; }
 .weekly-day-column > header strong { color: #172137; font-size: 14px; }
@@ -8577,7 +8598,10 @@ html[data-theme="dark"] .sidebar .nav-link:not(.active) {
 .weekly-day-column > header > span { align-items: center; border: 1px solid #dfe3ec; border-radius: 7px; color: #64718a; display: flex; font-size: 11px; gap: 5px; justify-content: flex-end; min-height: 34px; padding: 7px 9px; }
 .weekly-day-column > header > span .plan-icon { color: #7350ec; }
 .weekly-day-tasks { display: grid; gap: 8px; }
-.weekly-calendar-task { border: 1px solid #dce2eb; border-left: 3px solid #dce2eb; border-radius: 7px; display: grid; gap: 12px; min-height: 80px; padding: 11px 10px 9px; }
+.weekly-calendar-task { border: 1px solid #dce2eb; border-left: 3px solid #dce2eb; border-radius: 7px; cursor: grab; display: grid; gap: 12px; min-height: 80px; padding: 11px 10px 9px; position: relative; touch-action: none; user-select: none; will-change: transform; z-index: 1; }
+.weekly-calendar-task:focus-visible { outline: 2px solid #7047e8; outline-offset: 2px; }
+.weekly-calendar-task.dragging { box-shadow: 0 12px 28px rgba(55, 36, 108, .25); cursor: grabbing; opacity: .9; transition: none; z-index: 20; }
+.weekly-calendar-task button { touch-action: auto; }
 .weekly-calendar-task.completed { border-left-color: #33bb70; }
 .weekly-calendar-task-top { align-items: start; display: flex; gap: 8px; justify-content: space-between; }
 .weekly-calendar-task-top strong { color: #1c2639; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
@@ -9046,11 +9070,26 @@ html[data-theme="dark"] .sidebar .nav-link:not(.active) {
 .coach-message.user small { text-align: right; }
 .coach-message p { background: #f6f4fb; border: 1px solid #ebe7f4; border-radius: 4px 13px 13px 13px; color: #263149; font-size: 12px; line-height: 1.65; margin: 0; padding: 11px 14px; white-space: pre-wrap; }
 .coach-message.user p { background: linear-gradient(120deg, #7444ee, #6231e9); border: 0; border-radius: 13px 4px 13px 13px; color: white; }
-.coach-typing p { align-items: center; display: flex; gap: 4px; min-height: 39px; }
-.coach-typing p i { animation: coach-dot 1s ease-in-out infinite; background: #8d72d9; border-radius: 50%; height: 6px; width: 6px; }
-.coach-typing p i:nth-child(2) { animation-delay: .15s; }
-.coach-typing p i:nth-child(3) { animation-delay: .3s; }
-@keyframes coach-dot { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+.coach-markdown-line { display: block; }
+.coach-markdown-line strong,
+.coach-markdown-list-item strong { font-weight: 750; }
+.coach-markdown-spacer { display: block; height: .75em; }
+.coach-markdown-list-item { align-items: flex-start; display: flex; gap: 7px; }
+.coach-markdown-list-item > i { flex: 0 0 13px; font-style: normal; text-align: right; }
+.coach-markdown-list-item > span { min-width: 0; }
+.coach-typing p { align-items: center; display: flex; height: 54px; min-width: 132px; overflow: hidden; padding-block: 4px; }
+.coach-cat-loader { display: block; height: 48px; overflow: visible; width: 94px; }
+.coach-cat-body { fill: #15121c; }
+.coach-cat-tail { fill: none; stroke: #15121c; stroke-linecap: round; stroke-width: 9px; }
+.coach-cat-detail { fill: none; stroke: #8d72d9; stroke-linecap: round; stroke-width: 2px; }
+.coach-cat-leg { fill: none; stroke: #15121c; stroke-linecap: round; stroke-width: 8px; transform-box: fill-box; transform-origin: 50% 0; }
+.coach-cat-leg-a { animation: coach-cat-leg-a .48s ease-in-out infinite alternate; }
+.coach-cat-leg-b { animation: coach-cat-leg-b .48s ease-in-out infinite alternate; }
+@keyframes coach-cat-leg-a { from { transform: rotate(17deg); } to { transform: rotate(-17deg); } }
+@keyframes coach-cat-leg-b { from { transform: rotate(-17deg); } to { transform: rotate(17deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .coach-cat-leg { animation: none; }
+}
 .coach-confirmation-card { align-items: center; background: #fffaf0; border: 1px solid #efdbad; border-radius: 12px; display: flex; gap: 18px; justify-content: space-between; margin: 0 clamp(18px, 5vw, 64px) 14px; padding: 13px 15px; }
 .coach-confirmation-card > div:first-child { display: grid; gap: 4px; }
 .coach-confirmation-card span { color: #a56810; font-size: 8px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }

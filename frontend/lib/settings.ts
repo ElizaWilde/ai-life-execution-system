@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 export type AppSettings = {
   name: string;
   email: string;
+  avatarDataUrl: string;
   timezone: string;
   weekStart: string;
   focusMinutes: string;
@@ -32,6 +33,7 @@ export const SETTINGS_EVENT = "ai-life-settings-change";
 export const defaultSettings: AppSettings = {
   name: "AI Life User",
   email: "user@example.com",
+  avatarDataUrl: "",
   timezone: "Asia/Singapore",
   weekStart: "Monday",
   focusMinutes: "25",

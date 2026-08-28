@@ -2,6 +2,7 @@ import asyncio
 
 import httpx
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from app.services.llm_service import LLMResponseError, LLMService
 
@@ -112,3 +113,98 @@ def test_generate_json_detects_non_200_response(monkeypatch):
 
     with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(_service().generate_json("system", "user"))
+
+
+class ExampleStructuredResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intent: str
+    minutes: int
+
+
+def test_generate_structured_sends_json_schema_and_validates(monkeypatch):
+    FakeAsyncClient.response = _response(
+        200,
+        {"message": {"content": '{"intent":"create_task","minutes":90}'}},
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(
+        _service().generate_structured(
+            system_prompt="Interpret the command.",
+            user_prompt="Add a ninety minute task.",
+            response_model=ExampleStructuredResponse,
+        )
+    )
+
+    assert result == ExampleStructuredResponse(intent="create_task", minutes=90)
+    assert FakeAsyncClient.request["json"]["format"] == ExampleStructuredResponse.model_json_schema()
+
+
+def test_generate_structured_rejects_schema_violation(monkeypatch):
+    FakeAsyncClient.response = _response(
+        200,
+        {"message": {"content": '{"intent":"create_task","minutes":"many"}'}},
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(LLMResponseError, match="does not match ExampleStructuredResponse"):
+        asyncio.run(
+            _service().generate_structured(
+                "Interpret the command.",
+                "Add a task.",
+                ExampleStructuredResponse,
+            )
+        )
+
+
+def test_call_structured_tool_validates_function_arguments(monkeypatch):
+    FakeAsyncClient.response = _response(
+        200,
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "function": {
+                        "name": "interpret_command",
+                        "arguments": {"intent": "create_task", "minutes": 90},
+                    }
+                }],
+            }
+        },
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(
+        _service().call_structured_tool(
+            "Call the tool.",
+            "Add a task.",
+            ExampleStructuredResponse,
+            tool_name="interpret_command",
+            tool_description="Interpret a command.",
+        )
+    )
+
+    assert result.minutes == 90
+    tool = FakeAsyncClient.request["json"]["tools"][0]["function"]
+    assert tool["name"] == "interpret_command"
+    assert tool["parameters"] == ExampleStructuredResponse.model_json_schema()
+
+
+def test_call_structured_tool_rejects_missing_call(monkeypatch):
+    FakeAsyncClient.response = _response(
+        200,
+        {"message": {"role": "assistant", "content": "plain text"}},
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(LLMResponseError, match="did not call the required"):
+        asyncio.run(
+            _service().call_structured_tool(
+                "Call the tool.",
+                "Add a task.",
+                ExampleStructuredResponse,
+                tool_name="interpret_command",
+                tool_description="Interpret a command.",
+            )
+        )

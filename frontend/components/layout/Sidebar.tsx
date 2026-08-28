@@ -33,6 +33,15 @@ export default function Sidebar({ compact = false, onNavigate }: { compact?: boo
   return <aside aria-label="Primary navigation" className={compact ? "sidebar is-compact" : "sidebar"} id="app-sidebar">
     <Link href="/dashboard" className="brand-lockup"><WitchHatIcon className="brand-witch-hat" size={40} /><span><strong>AI Life</strong><small>Execution System</small></span></Link>
     <nav>{navItems.map((item) => <Link aria-label={item.label} key={item.href} href={item.href} onClick={onNavigate} title={compact ? item.label : undefined} className={`nav-link ${pathname === item.href ? "active" : ""}`}><NavIcon name={item.icon} /><span>{item.label}</span></Link>)}</nav>
-    <div className="sidebar-user"><span className="user-avatar">{initials}</span><div><strong>{settings.name}</strong><small>{settings.email}</small></div><b>⌄</b></div>
+    <Link aria-label="Open profile settings" className="sidebar-user" href="/settings#profile" onClick={onNavigate}>
+      <span
+        aria-hidden="true"
+        className={`user-avatar ${settings.avatarDataUrl ? "has-image" : ""}`}
+        style={settings.avatarDataUrl ? { backgroundImage: `url(${settings.avatarDataUrl})` } : undefined}
+      >
+        {settings.avatarDataUrl ? "" : initials}
+      </span>
+      <div><strong>{settings.name}</strong><small>{settings.email}</small></div><b aria-hidden="true">›</b>
+    </Link>
   </aside>;
 }

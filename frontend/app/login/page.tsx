@@ -70,6 +70,7 @@ function mergeBackendAppSettings(
 ): SettingsState {
   return {
     ...current,
+    avatarDataUrl: saved.avatar_data_url || "",
     weekStart: saved.week_start,
     focusMinutes: String(saved.focus_minutes),
     shortBreak: String(saved.short_break_minutes),
@@ -92,7 +93,6 @@ function mergeBackendAppSettings(
 
 function backendAppSettingsPayload(
   value: SettingsState,
-  avatarDataUrl: string,
 ): Omit<UserAppSettings, "id" | "user_id" | "created_at" | "updated_at"> {
   return {
     week_start: value.weekStart as "Monday" | "Sunday",
@@ -112,7 +112,7 @@ function backendAppSettingsPayload(
     coach_roaming_enabled: value.coachRoamingEnabled,
     coach_move_interval_seconds: value.coachMoveIntervalSeconds,
     integrations: value.integrations as UserAppSettings["integrations"],
-    avatar_data_url: avatarDataUrl || null,
+    avatar_data_url: value.avatarDataUrl || null,
   };
 }
 
@@ -147,7 +147,6 @@ const settingNav: { id: string; label: string; hint: string; icon: SettingIconNa
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsState>(defaults);
   const [activeSection, setActiveSection] = useState("profile");
-  const [avatarUrl, setAvatarUrl] = useState("");
   const [message, setMessage] = useState("");
   const [automation, setAutomation] = useState<EditableAutomationPreferences>(defaultAutomationPreferences);
   const [savingAll, setSavingAll] = useState(false);
@@ -175,7 +174,6 @@ export default function SettingsPage() {
     api.getAppSettings()
       .then((saved) => {
         setSettings((current) => mergeBackendAppSettings(current, saved));
-        setAvatarUrl(saved.avatar_data_url || "");
       })
       .catch((error: Error) => setMessage(`Could not load app settings: ${error.message}`));
   }, []);
@@ -197,7 +195,7 @@ export default function SettingsPage() {
           ...automation,
           timezone: settings.timezone,
         }),
-        api.updateAppSettings(backendAppSettingsPayload(settings, avatarUrl)),
+        api.updateAppSettings(backendAppSettingsPayload(settings)),
       ]);
       const synchronized = mergeBackendAppSettings(
         {
@@ -275,8 +273,7 @@ export default function SettingsPage() {
     }
     const reader = new FileReader();
     reader.onload = () => {
-      setAvatarUrl(String(reader.result));
-      setMessage("You have unsaved settings changes.");
+      update("avatarDataUrl", String(reader.result));
     };
     reader.readAsDataURL(file);
   }
@@ -322,7 +319,7 @@ export default function SettingsPage() {
   }
 
   function exportSettings() {
-    const payload = JSON.stringify({ settings, avatarDataUrl: avatarUrl || null }, null, 2);
+    const payload = JSON.stringify({ settings }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -339,8 +336,13 @@ export default function SettingsPage() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result)) as { settings?: Partial<SettingsState>; avatarDataUrl?: string | null };
-        if (parsed.settings) setSettings({ ...defaults, ...parsed.settings });
-        if (parsed.avatarDataUrl !== undefined) setAvatarUrl(parsed.avatarDataUrl || "");
+        if (parsed.settings) {
+          setSettings({
+            ...defaults,
+            ...parsed.settings,
+            avatarDataUrl: parsed.settings.avatarDataUrl || parsed.avatarDataUrl || "",
+          });
+        }
         setMessage("Settings imported successfully.");
       } catch {
         setMessage("That file is not a valid AI Life settings export.");
@@ -353,7 +355,6 @@ export default function SettingsPage() {
     if (!window.confirm("Clear locally saved preferences and restore defaults? Backend tasks and reviews will not be deleted.")) return;
     window.localStorage.removeItem(SETTINGS_KEY);
     setSettings(defaults);
-    setAvatarUrl("");
     setMessage("Local preferences were reset. Backend data was not deleted.");
   }
 
@@ -371,7 +372,7 @@ export default function SettingsPage() {
         <aside className="settings-section-nav">{settingNav.map((item) => <button className={activeSection === item.id ? "active" : ""} key={item.id} onClick={() => scrollTo(item.id)} type="button"><SettingIcon name={item.icon} /><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}<div className="settings-nav-save"><button disabled={savingAll} onClick={saveAllSettings} type="button">{savingAll ? "Saving..." : "Save profile"}</button><small>Saves all settings</small></div></aside>
 
         <main className="settings-panels">
-          <section className="settings-card profile-settings" id="profile"><h2>Profile</h2><div className="settings-profile-grid"><div className="settings-fields"><label>Name<input value={settings.name} onChange={(event) => update("name", event.target.value)} /></label><label>Email<input type="email" value={settings.email} onChange={(event) => update("email", event.target.value)} /></label><label>Telegram chat ID<input inputMode="numeric" placeholder="Example: 123456789" value={automation.telegram_chat_id || ""} onChange={(event) => updateAutomation("telegram_chat_id", event.target.value || null)} /></label></div><div className="settings-fields"><label>Avatar<span className="avatar-control"><i style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}>{avatarUrl ? "" : settings.name.slice(0, 2).toUpperCase()}</i><b><SettingIcon name="upload" size={14} /> Change<input accept="image/*" onChange={changeAvatar} type="file" /></b></span></label><label>Time Zone<select value={settings.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Singapore">(UTC+08:00) Beijing, Shanghai, Singapore</option><option value="Europe/London">(UTC+00:00) London</option><option value="America/New_York">(UTC-05:00) New York</option><option value="America/Los_Angeles">(UTC-08:00) Los Angeles</option></select></label></div></div></section>
+          <section className="settings-card profile-settings" id="profile"><h2>Profile</h2><div className="settings-profile-grid"><div className="settings-fields"><label>Name<input value={settings.name} onChange={(event) => update("name", event.target.value)} /></label><label>Email<input type="email" value={settings.email} onChange={(event) => update("email", event.target.value)} /></label><label>Telegram chat ID<input inputMode="numeric" placeholder="Example: 123456789" value={automation.telegram_chat_id || ""} onChange={(event) => updateAutomation("telegram_chat_id", event.target.value || null)} /></label></div><div className="settings-fields"><label>Avatar<span className="avatar-control"><i style={settings.avatarDataUrl ? { backgroundImage: `url(${settings.avatarDataUrl})` } : undefined}>{settings.avatarDataUrl ? "" : settings.name.slice(0, 2).toUpperCase()}</i><b><SettingIcon name="upload" size={14} /> Change<input accept="image/*" onChange={changeAvatar} type="file" /></b></span></label><label>Time Zone<select value={settings.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Singapore">(UTC+08:00) Beijing, Shanghai, Singapore</option><option value="Europe/London">(UTC+00:00) London</option><option value="America/New_York">(UTC-05:00) New York</option><option value="America/Los_Angeles">(UTC-08:00) Los Angeles</option></select></label></div></div></section>
 
           <section className="settings-card" id="preferences"><h2>Preferences</h2><div className="preference-grid"><label>Week starts on<select value={settings.weekStart} onChange={(event) => update("weekStart", event.target.value)}><option>Monday</option><option>Sunday</option></select></label><div className="theme-field"><span>Theme</span><div>{(["light", "dark", "auto"] as const).map((theme) => <button className={settings.theme === theme ? "active" : ""} key={theme} onClick={() => update("theme", theme)} type="button"><SettingIcon name={theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor"} size={15} /> {theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="working-days-field"><span>Working days</span><div>{workingDayOptions.map((day) => <label key={day.value}><input checked={automation.working_days.includes(day.value)} onChange={() => toggleWorkingDay(day.value)} type="checkbox" /><span>{day.label}</span></label>)}</div></div></div></section>
 
