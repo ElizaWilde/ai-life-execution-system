@@ -54,6 +54,8 @@ class AutomationPreference(Base):
         JSON,
         default=lambda: ["monday", "tuesday", "wednesday", "thursday", "friday"],
     )
+    working_start_hour: Mapped[int] = mapped_column(Integer, default=7, server_default="7")
+    working_end_hour: Mapped[int] = mapped_column(Integer, default=22, server_default="22")
     preferred_study_periods_json: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON,
         default=list,

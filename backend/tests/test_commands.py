@@ -45,16 +45,18 @@ def test_create_today_task_requires_confirmation(client, user_headers):
     assert command.status_code == 200
     assert command.json()["intent"] == "create_task"
     assert command.json()["status"] == "pending_confirmation"
+    command_date = command.json()["parameters_json"]["task_date"]
     assert command.json()["parameters_json"] == {
         "title": "learn eg",
         "description": None,
-        "task_date": date.today().isoformat(),
+        "task_date": datetime.now(timezone.utc).date().isoformat(),
         "estimated_minutes": 60,
         "channel": "study",
         "priority": "high",
         "weekly_goal_id": None,
     }
-    assert all(item["title"] != "learn eg" for item in client.get("/daily-tasks/today", headers=user_headers).json())
+    before = client.get("/daily-tasks", headers=user_headers, params={"date": command_date}).json()
+    assert all(item["title"] != "learn eg" for item in before)
 
     confirmed = client.post(
         f"/coordinator/commands/{command.json()['id']}/confirm",
@@ -63,7 +65,7 @@ def test_create_today_task_requires_confirmation(client, user_headers):
 
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "completed"
-    tasks = client.get("/daily-tasks/today", headers=user_headers).json()
+    tasks = client.get("/daily-tasks", headers=user_headers, params={"date": command_date}).json()
     created = next(item for item in tasks if item["title"] == "learn eg")
     assert created["estimated_minutes"] == 60
     assert created["priority"] == "high"
@@ -605,3 +607,158 @@ def test_rejecting_reschedule_command_rejects_its_proposal(client, user_headers)
         proposal = db.get(ReschedulingProposal, proposal_id)
         assert proposal is not None
         assert proposal.status == "rejected"
+
+
+def test_targeted_move_resolves_one_task_and_preserves_start_time(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    tomorrow = date.today() + timedelta(days=1)
+    target = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Move only this task",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 60,
+            "scheduled_start_minutes": 900,
+        },
+    ).json()
+
+    async def interpret(_db, _user, _message):
+        return "reschedule_task", {
+            "scope": "single_task",
+            "query": "Move only this task",
+            "source_task_date": date.today().isoformat(),
+            "source_start_minutes": None,
+            "destination_date": tomorrow.isoformat(),
+            "destination_start_minutes": None,
+            "preserve_start_time": True,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "targeted-move-command"},
+        json={"message": "Move today's Move only this task to tomorrow at the same time"},
+    ).json()
+
+    assert command["status"] == "pending_confirmation"
+    assert command["parameters_json"]["daily_task_id"] == target["id"]
+    assert command["parameters_json"]["destination_start_minutes"] == 900
+    assert "move 1 task" not in command["response_message"].casefold()
+    assert target["title"] in command["response_message"]
+
+    confirmed = client.post(
+        f"/coordinator/commands/{command['id']}/confirm",
+        headers=user_headers,
+    ).json()
+    assert confirmed["status"] == "completed"
+    moved = next(
+        task for task in client.get(
+            "/daily-tasks",
+            headers=user_headers,
+            params={"date": tomorrow.isoformat()},
+        ).json()
+        if task["id"] == target["id"]
+    )
+    assert moved["task_date"] == tomorrow.isoformat()
+    assert moved["scheduled_start_minutes"] == 900
+
+
+def test_targeted_move_blocks_ambiguous_task_name(client, user_headers, monkeypatch):
+    tomorrow = date.today() + timedelta(days=1)
+    for start in (750, 1020):
+        client.post(
+            "/daily-tasks",
+            headers=user_headers,
+            json={
+                "title": "Duplicate move target",
+                "task_date": date.today().isoformat(),
+                "estimated_minutes": 30,
+                "scheduled_start_minutes": start,
+            },
+        )
+
+    async def interpret(_db, _user, _message):
+        return "reschedule_task", {
+            "scope": "single_task",
+            "query": "Duplicate move target",
+            "source_task_date": date.today().isoformat(),
+            "source_start_minutes": None,
+            "destination_date": tomorrow.isoformat(),
+            "destination_start_minutes": None,
+            "preserve_start_time": True,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "ambiguous-move-command"},
+        json={"message": "Move Duplicate move target tomorrow"},
+    ).json()
+
+    assert command["status"] == "failed"
+    assert command["result_json"]["decision"]["code"] == "ambiguous_task_match"
+    assert len(command["result_json"]["decision"]["conflicts"]) == 2
+
+
+def test_targeted_move_rechecks_destination_conflict_on_confirmation(
+    client,
+    user_headers,
+    monkeypatch,
+):
+    tomorrow = date.today() + timedelta(days=1)
+    target = client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "Move with late conflict",
+            "task_date": date.today().isoformat(),
+            "estimated_minutes": 60,
+            "scheduled_start_minutes": 900,
+        },
+    ).json()
+
+    async def interpret(_db, _user, _message):
+        return "reschedule_task", {
+            "scope": "single_task",
+            "query": target["title"],
+            "source_task_date": date.today().isoformat(),
+            "source_start_minutes": 900,
+            "destination_date": tomorrow.isoformat(),
+            "destination_start_minutes": None,
+            "preserve_start_time": True,
+        }
+
+    monkeypatch.setattr(coordinator_service, "interpret_command", interpret)
+    command = client.post(
+        "/coordinator/commands",
+        headers={**user_headers, "Idempotency-Key": "late-move-conflict-command"},
+        json={"message": "Move the task tomorrow"},
+    ).json()
+    assert command["status"] == "pending_confirmation"
+
+    client.post(
+        "/daily-tasks",
+        headers=user_headers,
+        json={
+            "title": "New destination blocker",
+            "task_date": tomorrow.isoformat(),
+            "estimated_minutes": 60,
+            "scheduled_start_minutes": 900,
+        },
+    )
+    confirmed = client.post(
+        f"/coordinator/commands/{command['id']}/confirm",
+        headers=user_headers,
+    ).json()
+
+    assert confirmed["status"] == "failed"
+    assert confirmed["result_json"]["decision"]["code"] == "schedule_conflict"
+    current = next(
+        task for task in client.get("/daily-tasks/today", headers=user_headers).json()
+        if task["id"] == target["id"]
+    )
+    assert current["task_date"] == date.today().isoformat()

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DailyTask, WeeklyGoal
 from app.schemas.daily_task import DailyPlanResponse
+from app.schemas.weekly_priority_plan import WeeklyPriorityPlan
 from app.services.coaching_context_service import coaching_context_service
 from app.services.estimation_calibration_service import (
     EstimationCalibration,
@@ -28,7 +29,27 @@ class MissingActiveWeeklyGoalError(ValueError):
 
 
 class PlanningService:
-    """Generate and persist AI daily plans from weekly goals and unfinished tasks."""
+    """Planning-agent operations for weekly priorities and derived daily plans."""
+
+    def create_weekly_priorities(
+        self, db: Session, user_id: int, plan: WeeklyPriorityPlan
+    ) -> list[WeeklyGoal]:
+        """Stage a validated batch; the coordinator commits it with the confirmation."""
+        due_at = task_deadline_service.calculate_weekly_goal(db, user_id, plan.week_end)
+        goals = [
+            WeeklyGoal(
+                user_id=user_id,
+                week_start=plan.week_start,
+                week_end=plan.week_end,
+                due_at=due_at,
+                status="active",
+                **item.model_dump(),
+            )
+            for item in plan.weekly_priorities
+        ]
+        db.add_all(goals)
+        db.flush()
+        return goals
 
     async def generate_daily_plan(
         self,

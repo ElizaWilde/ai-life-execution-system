@@ -3,9 +3,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.weekly_priority_plan import WeeklyPriorityDraft
+
 
 CommandIntent = Literal[
     "create_task",
+    "create_weekly_priorities",
     "create_reminder",
     "reschedule_task",
     "reduce_workload",
@@ -29,6 +32,8 @@ class CommandInterpretation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intent: CommandIntent
+    week_start: date | None = None
+    weekly_priorities: list[WeeklyPriorityDraft] | None = Field(default=None, min_length=1, max_length=20)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=2_000)
     task_date: date | None = None
@@ -38,6 +43,14 @@ class CommandInterpretation(BaseModel):
     channel: Literal["work", "assignments", "networking", "projects", "study", "personal"] | None = None
     weekly_goal_query: str | None = Field(default=None, min_length=1, max_length=255)
     query: str | None = Field(default=None, min_length=1, max_length=255)
+    reschedule_scope: Literal["single_task", "all_overdue"] | None = None
+    source_task_date: date | None = None
+    source_date_was_stated: bool = False
+    source_start_minutes: int | None = Field(default=None, ge=0, le=1_439)
+    source_start_was_stated: bool = False
+    destination_date: date | None = None
+    destination_start_minutes: int | None = Field(default=None, ge=0, le=1_439)
+    preserve_start_time: bool = True
     proposed_minutes: int | None = Field(default=None, ge=1, le=1_440)
     resource_type: Literal["daily_task", "weekly_goal", "phase", "milestone"] | None = None
     field_name: str | None = Field(default=None, min_length=1, max_length=80)
@@ -54,6 +67,7 @@ class CommandInterpretation(BaseModel):
     def validate_intent_fields(self) -> "CommandInterpretation":
         required: dict[str, tuple[str, ...]] = {
             "create_task": ("title", "task_date", "estimated_minutes"),
+            "create_weekly_priorities": ("weekly_priorities",),
             "create_reminder": ("reminder_subject", "reminder_hour", "reminder_minute"),
             "complete_task": ("query",),
             "change_task_duration": ("query", "proposed_minutes"),
@@ -61,6 +75,15 @@ class CommandInterpretation(BaseModel):
         }
         if not self.clarification_needed:
             missing = [name for name in required.get(self.intent, ()) if getattr(self, name) is None]
+            if self.intent == "reschedule_task":
+                if self.reschedule_scope is None:
+                    missing.append("reschedule_scope")
+                elif self.reschedule_scope == "single_task":
+                    missing.extend(
+                        name
+                        for name in ("query", "destination_date")
+                        if getattr(self, name) is None
+                    )
             if missing:
                 raise ValueError(f"{self.intent} is missing required fields: {', '.join(missing)}")
         if self.clarification_needed and not self.clarification_question:
@@ -74,9 +97,10 @@ class CommandDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     allowed: bool
-    code: Literal["allowed", "duplicate_task_name", "schedule_conflict", "task_conflict"]
+    code: str = Field(min_length=1, max_length=80)
     message: str
     conflicts: list[dict] = Field(default_factory=list)
+    parameters_patch: dict = Field(default_factory=dict)
 
 
 class CommandRead(BaseModel):

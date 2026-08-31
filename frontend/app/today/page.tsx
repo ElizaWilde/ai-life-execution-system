@@ -308,7 +308,6 @@ export default function TodayPage() {
   }
 
   async function deleteTask(task: DailyTask) {
-    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
     setBusy(true);
     setError("");
     try {

@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.schemas.notification import NotificationSend
 from app.schemas.command import CommandInterpretation
+from app.schemas.weekly_priority_plan import WeeklyPriorityPlan
 from app.services.automation_audit_service import automation_audit_service
 from app.services.automation_policy_service import (
     AutomationAction,
@@ -32,6 +33,7 @@ from app.services.forecast_service import forecast_service
 from app.services.llm_service import llm_service
 from app.services.notification_service import notification_service
 from app.services.plan_preview_service import plan_preview_service
+from app.services.planning_service import planning_service
 from app.services.rescheduling_proposal_service import rescheduling_proposal_service
 from app.services.task_deadline_service import task_deadline_service
 
@@ -57,8 +59,21 @@ by the API is the only valid output contract. Do not answer the user and do not 
 
 Supported intents:
 - create_task: create a daily task; use task_date, estimated_minutes, and optional scheduled_start_minutes.
+- create_weekly_priorities: planning-agent action to ADD one or more weekly priorities/goals.
+  Put EVERY requested item in weekly_priorities, each with title, target_minutes, and priority.
+  Use week_start for the requested week's first date, defaulting to supplied current_week_start.
+  Convert each item's hours to minutes (10h = 600 target_minutes, not a daily task duration).
+  A numbered or semicolon-separated list is ONE batch in ONE tool call, never separate calls.
+  In an add request, titles such as "update ai coach" are NEW priority titles, not update_content.
+  Missing or incomplete priority labels default to medium for that item only; do not copy a
+  preceding item's high priority. Never turn weekly priorities into daily scheduled tasks.
 - complete_task: mark an existing task complete; put the identifying words in query.
 - change_task_duration: change an existing task estimate; use query and proposed_minutes.
+- reschedule_task: for one named task use reschedule_scope=single_task, query, source_task_date
+  and source_start_minutes only when explicitly stated by the user, destination_date, and
+  preserve_start_time. Set the corresponding source_date_was_stated/source_start_was_stated
+  flags; never copy an unstated source date or time from the resource catalog. Use
+  reschedule_scope=all_overdue only when the user explicitly asks to move all overdue tasks.
 - update_content: edit a daily_task, weekly_goal, phase, or milestone; use resource_type, query,
   field_name, and new_value.
 - create_reminder, reschedule_task, reduce_workload, get_progress, get_forecast, get_coaching.
@@ -224,6 +239,7 @@ class CoordinatorService:
         return {
             "local_datetime": local_now.isoformat(),
             "local_date": local_now.date().isoformat(),
+            "current_week_start": (local_now.date() - timedelta(days=local_now.weekday())).isoformat(),
             "timezone": str(zone),
             "tasks": [
                 {
@@ -248,6 +264,15 @@ class CoordinatorService:
             return "unknown", {"clarification_question": interpreted.clarification_question}
 
         intent = interpreted.intent
+        if intent == "create_weekly_priorities":
+            today = self._user_local_date(db, user_id)
+            week_start = interpreted.week_start or (today - timedelta(days=today.weekday()))
+            plan = WeeklyPriorityPlan(
+                week_start=week_start,
+                week_end=week_start + timedelta(days=6),
+                weekly_priorities=interpreted.weekly_priorities,
+            )
+            return intent, plan.model_dump(mode="json")
         if intent == "create_task":
             if (
                 interpreted.scheduled_start_minutes is not None
@@ -299,7 +324,23 @@ class CoordinatorService:
                 "minute": interpreted.reminder_minute,
             }
         if intent == "reschedule_task":
-            return intent, {"scope": "overdue", "horizon_days": interpreted.horizon_days or 14}
+            if interpreted.reschedule_scope == "all_overdue":
+                return intent, {"scope": "overdue", "horizon_days": interpreted.horizon_days or 14}
+            return intent, {
+                "scope": "single_task",
+                "query": interpreted.query,
+                "source_task_date": (
+                    interpreted.source_task_date.isoformat()
+                    if interpreted.source_task_date
+                    else None
+                ),
+                "source_date_was_stated": interpreted.source_date_was_stated,
+                "source_start_minutes": interpreted.source_start_minutes,
+                "source_start_was_stated": interpreted.source_start_was_stated,
+                "destination_date": interpreted.destination_date.isoformat(),
+                "destination_start_minutes": interpreted.destination_start_minutes,
+                "preserve_start_time": interpreted.preserve_start_time,
+            }
         if intent == "reduce_workload":
             return intent, {"reduction_percent": interpreted.reduction_percent or 20}
         return intent, {}
@@ -383,9 +424,12 @@ class CoordinatorService:
 
         intent, parameters = await self.interpret_command(db, user, normalized)
         decision = command_decision_service.evaluate(db, user.id, intent, parameters)
+        if decision.parameters_patch:
+            parameters = {**parameters, **decision.parameters_patch}
         blocked = not decision.allowed
         requires_confirmation = not blocked and intent in {
             "create_task",
+            "create_weekly_priorities",
             "reschedule_task",
             "reduce_workload",
             "complete_task",
@@ -509,33 +553,37 @@ class CoordinatorService:
                 == f"command:{command.idempotency_key}"[:180]
             )
         )
-        if command.intent == "create_task":
-            decision = command_decision_service.evaluate(
-                db,
-                user.id,
-                command.intent,
-                command.parameters_json,
-            )
-            if not decision.allowed:
-                command.status = "failed"
-                command.requires_confirmation = False
-                command.response_message = decision.message
-                command.result_json = {"decision": decision.model_dump(mode="json")}
-                command.executed_at = datetime.now(timezone.utc)
-                command.expires_at = None
-                db.commit()
-                db.refresh(command)
-                if audit is not None:
-                    automation_audit_service.complete(
-                        db,
-                        audit,
-                        decision_json={
-                            "intent": command.intent,
-                            **decision.model_dump(mode="json"),
-                        },
-                        confirmation_status="rejected",
-                    )
-                return command
+        decision = command_decision_service.evaluate(
+            db,
+            user.id,
+            command.intent,
+            command.parameters_json,
+        )
+        if decision.parameters_patch:
+            command.parameters_json = {
+                **command.parameters_json,
+                **decision.parameters_patch,
+            }
+        if not decision.allowed:
+            command.status = "failed"
+            command.requires_confirmation = False
+            command.response_message = decision.message
+            command.result_json = {"decision": decision.model_dump(mode="json")}
+            command.executed_at = datetime.now(timezone.utc)
+            command.expires_at = None
+            db.commit()
+            db.refresh(command)
+            if audit is not None:
+                automation_audit_service.complete(
+                    db,
+                    audit,
+                    decision_json={
+                        "intent": command.intent,
+                        **decision.model_dump(mode="json"),
+                    },
+                    confirmation_status="rejected",
+                )
+            return command
         try:
             result, message = self._execute_confirmed(db, user, command)
             command.status = "completed"
@@ -658,6 +706,17 @@ class CoordinatorService:
         user: User,
         command: AutomationCommand,
     ) -> str:
+        if command.intent == "create_weekly_priorities":
+            plan = WeeklyPriorityPlan.model_validate(command.parameters_json)
+            items = "\n".join(
+                f"{index}. {item.title} — {self._format_minutes(item.target_minutes)}, {item.priority} priority"
+                for index, item in enumerate(plan.weekly_priorities, start=1)
+            )
+            total = sum(item.target_minutes for item in plan.weekly_priorities)
+            return (
+                f"Add {len(plan.weekly_priorities)} weekly priorities for {plan.week_start}–{plan.week_end}:\n\n"
+                f"{items}\n\nTotal: {self._format_minutes(total)}. Confirm? No daily tasks will be created."
+            )
         if command.intent == "create_task":
             parameters = command.parameters_json
             details = [
@@ -674,6 +733,16 @@ class CoordinatorService:
                 f"({', '.join(details)}). Confirm?"
             )
         if command.intent == "reschedule_task":
+            if command.parameters_json.get("scope") == "single_task":
+                parameters = command.parameters_json
+                time_detail = ""
+                if parameters.get("destination_start_minutes") is not None:
+                    start = int(parameters["destination_start_minutes"])
+                    time_detail = f" at {start // 60:02d}:{start % 60:02d}"
+                return (
+                    f"Move “{parameters['title']}” from {parameters['original_date']} "
+                    f"to {parameters['destination_date']}{time_detail}. Confirm?"
+                )
             proposal = rescheduling_proposal_service.create_for_user(
                 db,
                 user.id,
@@ -873,6 +942,25 @@ class CoordinatorService:
         user: User,
         command: AutomationCommand,
     ) -> tuple[dict, str]:
+        if command.intent == "create_weekly_priorities":
+            decision = automation_policy_service.evaluate(
+                AutomationAction.CREATE_WEEKLY_PRIORITIES, confirmed=True,
+            )
+            if not decision.allowed:
+                raise ValueError(decision.reason)
+            plan = WeeklyPriorityPlan.model_validate(command.parameters_json)
+            goals = planning_service.create_weekly_priorities(db, user.id, plan)
+            return (
+                {
+                    "agent": "planning",
+                    "week_start": plan.week_start.isoformat(),
+                    "week_end": plan.week_end.isoformat(),
+                    "weekly_goal_ids": [goal.id for goal in goals],
+                    "records_changed": [{"model": "WeeklyGoal", "id": goal.id} for goal in goals],
+                },
+                f"Added {len(goals)} weekly priorities for {plan.week_start}–{plan.week_end}, "
+                f"totaling {self._format_minutes(sum(item.target_minutes for item in plan.weekly_priorities))}.",
+            )
         if command.intent == "create_task":
             decision = automation_policy_service.evaluate(
                 AutomationAction.CREATE_TASK,
@@ -927,6 +1015,36 @@ class CoordinatorService:
             )
             if not decision.allowed:
                 raise ValueError(decision.reason)
+            if command.parameters_json.get("scope") == "single_task":
+                parameters = command.parameters_json
+                task = db.scalar(
+                    select(DailyTask).where(
+                        DailyTask.id == int(parameters["daily_task_id"]),
+                        DailyTask.user_id == user.id,
+                    )
+                )
+                if task is None:
+                    raise ValueError("The selected task no longer exists.")
+                previous_date = task.task_date
+                task.task_date = date.fromisoformat(parameters["destination_date"])
+                task.scheduled_start_minutes = parameters.get("destination_start_minutes")
+                task.due_at = task_deadline_service.calculate(
+                    db,
+                    user.id,
+                    task.task_date,
+                    task.planning_scope,
+                )
+                db.commit()
+                return (
+                    {
+                        "daily_task_id": task.id,
+                        "previous_date": previous_date.isoformat(),
+                        "task_date": task.task_date.isoformat(),
+                        "scheduled_start_minutes": task.scheduled_start_minutes,
+                        "records_changed": [{"model": "DailyTask", "id": task.id}],
+                    },
+                    f"Moved “{task.title}” to {task.task_date.isoformat()}.",
+                )
             proposal = rescheduling_proposal_service.confirm(
                 db,
                 user.id,

@@ -192,6 +192,8 @@ export default function WeeklyPlanPage() {
   const [week, setWeek] = useState<WeekDashboard | null>(null);
   const [weeklyPreview, setWeeklyPreview] = useState<WeeklyPlanPreview | null>(null);
   const [workingDays, setWorkingDays] = useState<WorkingDay[]>(["monday", "tuesday", "wednesday", "thursday", "friday"]);
+  const [workingHours, setWorkingHours] = useState({ start: 7, end: 22 });
+  const availableStartHours = Array.from({ length: workingHours.end - workingHours.start + 1 }, (_, index) => workingHours.start + index);
   const [calendarTasks, setCalendarTasks] = useState<Record<string, DailyTask[]>>({});
   const [calendarView, setCalendarView] = useState<"list" | "timeline">("list");
   const [calendarFormDate, setCalendarFormDate] = useState<string | null>(null);
@@ -248,6 +250,7 @@ export default function WeeklyPlanPage() {
       setWeek(weekData);
       setWeeklyPreview(previewData);
       setWorkingDays(automationPreferences.working_days);
+      setWorkingHours({ start: automationPreferences.working_start_hour ?? 7, end: automationPreferences.working_end_hour ?? 22 });
       setCalendarTasks(Object.fromEntries(taskEntries));
       setCalendarFormDate((current) => current && taskEntries.some(([date]) => date === current) ? current : null);
       if (previewData) setIntendedHours(String(previewData.intended_minutes / 60));
@@ -609,7 +612,6 @@ export default function WeeklyPlanPage() {
   }
 
   async function deleteTask(goal: WeeklyGoal) {
-    if (!window.confirm(`Delete "${goal.title}" from this weekly plan?`)) return;
     setBusy(true);
     setError("");
     try {
@@ -631,7 +633,7 @@ export default function WeeklyPlanPage() {
     setCalendarFormDate(date);
     setCalendarTaskTitle("");
     setCalendarTaskHours("1");
-    setCalendarTaskStartTime(minutesToTimeInput(Math.ceil(nextAvailableMinutes / 15) * 15));
+    setCalendarTaskStartTime(minutesToTimeInput(Math.max(workingHours.start * 60, Math.min(workingHours.end * 60 + 45, Math.ceil(nextAvailableMinutes / 15) * 15))));
     setCalendarTaskPriority("medium");
   }
 
@@ -649,8 +651,8 @@ export default function WeeklyPlanPage() {
       setError("Task duration must be at least 15 minutes.");
       return;
     }
-    if (!Number.isFinite(scheduledStartMinutes)) {
-      setError("Choose a valid start time.");
+    if (!Number.isFinite(scheduledStartMinutes) || scheduledStartMinutes < workingHours.start * 60 || scheduledStartMinutes >= (workingHours.end + 1) * 60 || scheduledStartMinutes % 15 !== 0) {
+      setError(`Choose a start hour from ${workingHours.start} to ${workingHours.end} in 15-minute increments.`);
       return;
     }
     if (scheduledStartMinutes + estimatedMinutes > 24 * 60) {
@@ -696,7 +698,6 @@ export default function WeeklyPlanPage() {
   }
 
   async function deleteCalendarTask(task: DailyTask) {
-    if (!window.confirm(`Delete "${task.title}" from ${formatPhaseDate(task.task_date)}?`)) return;
     setCalendarBusy(true);
     setError("");
     try {
@@ -863,7 +864,6 @@ export default function WeeklyPlanPage() {
   }
 
   async function deleteTimelineTask(task: DailyTask) {
-    if (!window.confirm(`Delete "${task.title}" from ${formatPhaseDate(task.task_date)}?`)) return false;
     setCalendarBusy(true);
     setError("");
     try {
@@ -1112,7 +1112,7 @@ export default function WeeklyPlanPage() {
             {loading ? <p className="weekly-calendar-loading">Loading calendar…</p> : null}
             {!loading && calendarView === "list" && workingDates.length ? (
               <div className="weekly-calendar-scroll">
-                <div className="weekly-calendar-grid" style={{ gridTemplateColumns: `repeat(${workingDates.length}, minmax(210px, 1fr))` }}>
+                <div className="weekly-calendar-grid" style={{ gridTemplateColumns: `repeat(${workingDates.length}, minmax(0, 1fr))`, minWidth: workingDates.length * 210 + (workingDates.length - 1) * 12 }}>
                   {workingDates.map((date) => {
                     const dayTasks = [...(calendarTasks[date] ?? [])].sort(
                       (left, right) =>
@@ -1128,8 +1128,11 @@ export default function WeeklyPlanPage() {
                       key={date}
                     >
                       <header>
-                        <div><strong>{dateAt(date).toLocaleDateString("en", { weekday: "long" })}</strong><time dateTime={date}>{dateAt(date).toLocaleDateString("en", { month: "short", day: "numeric" })}</time></div>
-                        <span><PlanIcon name="clock" size={13} /> {formatHours(dailyPlan?.focus_minutes ?? 0)} / {formatHours(plannedMinutes)}</span>
+                        <strong>{dateAt(date).toLocaleDateString("en", { weekday: "long" })}</strong>
+                        <div className="weekly-day-date-row">
+                          <time dateTime={date}>{dateAt(date).toLocaleDateString("en", { month: "short", day: "numeric" })}</time>
+                          <span className="weekly-day-hours" title="Focused hours / planned hours" aria-label={`${formatHours(dailyPlan?.focus_minutes ?? 0)} focused / ${formatHours(plannedMinutes)} planned`}><PlanIcon name="clock" size={12} /> {formatHours(dailyPlan?.focus_minutes ?? 0)} / {formatHours(plannedMinutes)}</span>
+                        </div>
                       </header>
                       <div className="weekly-day-tasks">
                         {dayTasks.map((task) => <div
@@ -1163,8 +1166,25 @@ export default function WeeklyPlanPage() {
                       </div>
                       {calendarFormDate === date ? <form className="weekly-calendar-task-form" onSubmit={createCalendarTask}>
                         <input aria-label="Task title" autoFocus maxLength={255} onChange={(event) => setCalendarTaskTitle(event.target.value)} placeholder="Task title" required value={calendarTaskTitle} />
-                        <div className="weekly-calendar-time-row"><label><span>Start time</span><input aria-label="Start time" onChange={(event) => setCalendarTaskStartTime(event.target.value)} required step="900" type="time" value={calendarTaskStartTime} /></label><label><span>End time</span><output aria-label="Calculated end time">{calendarTaskEndLabel}</output></label></div>
-                        <div><label><span>Duration (hours)</span><input aria-label="Estimated hours" min="0.25" onChange={(event) => setCalendarTaskHours(event.target.value)} required step="0.25" type="number" value={calendarTaskHours} /></label><label><span>Priority</span><select aria-label="Priority" onChange={(event) => setCalendarTaskPriority(event.target.value as Priority)} value={calendarTaskPriority}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div>
+                        <fieldset className="weekly-calendar-start-time">
+                          <legend>Start time</legend>
+                          <div>
+                            <select aria-label="Start hour" onChange={(event) => setCalendarTaskStartTime(`${event.target.value}:${calendarTaskStartTime.split(":")[1]}`)} value={calendarTaskStartTime.split(":")[0]}>
+                              {availableStartHours.some((hour) => hour < 12) ? <optgroup label="AM">
+                                {availableStartHours.filter((hour) => hour < 12).map((hour) => <option key={hour} value={String(hour).padStart(2, "0")}>{hour || 12} AM</option>)}
+                              </optgroup> : null}
+                              {availableStartHours.some((hour) => hour >= 12) ? <optgroup label="PM">
+                                {availableStartHours.filter((hour) => hour >= 12).map((hour) => <option key={hour} value={String(hour)}>{hour % 12 || 12} PM</option>)}
+                              </optgroup> : null}
+                            </select>
+                            <select aria-label="Start minute" onChange={(event) => setCalendarTaskStartTime(`${calendarTaskStartTime.split(":")[0]}:${event.target.value}`)} value={calendarTaskStartTime.split(":")[1]}>
+                              {["00", "15", "30", "45"].map((minute) => <option key={minute} value={minute}>:{minute}</option>)}
+                            </select>
+                          </div>
+                        </fieldset>
+                        <label><span>Duration (hours)</span><input aria-label="Estimated hours" min="0.25" onChange={(event) => setCalendarTaskHours(event.target.value)} required step="0.25" type="number" value={calendarTaskHours} /></label>
+                        <label><span>Priority</span><select aria-label="Priority" onChange={(event) => setCalendarTaskPriority(event.target.value as Priority)} value={calendarTaskPriority}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+                        <output aria-label="Calculated end time">Ends at {calendarTaskEndLabel}</output>
                         <footer><button disabled={calendarBusy} type="submit">Add task</button><button onClick={() => setCalendarFormDate(null)} type="button">Cancel</button></footer>
                       </form> : <button className="weekly-day-add" disabled={calendarBusy} onClick={() => openCalendarTaskForm(date)} type="button"><PlanIcon name="plus" size={13} /> Add task</button>}
                     </article>;

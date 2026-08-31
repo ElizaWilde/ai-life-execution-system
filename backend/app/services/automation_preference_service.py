@@ -25,6 +25,10 @@ class AutomationPreferenceService:
     ) -> AutomationPreference:
         preference = self.get_or_create(db, user_id)
         data = payload.model_dump(exclude_unset=True)
+        start_hour = data.get("working_start_hour", preference.working_start_hour)
+        end_hour = data.get("working_end_hour", preference.working_end_hour)
+        if start_hour >= end_hour:
+            raise ValueError("Working start hour must be earlier than working end hour.")
         if "working_days" in data:
             data["working_days_json"] = data.pop("working_days")
         if "preferred_study_periods" in data:

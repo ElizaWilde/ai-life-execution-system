@@ -73,6 +73,8 @@ export type AutomationPreferences = {
   quiet_hours_start: string;
   quiet_hours_end: string;
   working_days: WorkingDay[];
+  working_start_hour: number;
+  working_end_hour: number;
   preferred_study_periods: { start: string; end: string }[];
   created_at: string;
   updated_at: string;
@@ -326,7 +328,7 @@ export type AutomationCommand = {
   user_id: number;
   idempotency_key: string;
   command_text: string;
-  intent: "create_task" | "create_reminder" | "reschedule_task" | "reduce_workload" | "get_progress" | "get_forecast" | "get_coaching" | "complete_task" | "change_task_duration" | "update_content" | "unknown";
+  intent: "create_task" | "create_weekly_priorities" | "create_reminder" | "reschedule_task" | "reduce_workload" | "get_progress" | "get_forecast" | "get_coaching" | "complete_task" | "change_task_duration" | "update_content" | "unknown";
   parameters_json: Record<string, unknown>;
   status: "pending_confirmation" | "completed" | "rejected" | "failed" | "unknown";
   requires_confirmation: boolean;

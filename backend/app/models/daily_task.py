@@ -58,7 +58,9 @@ class DailyTask(Base):
         back_populates="daily_task"
     )
     proposal_items: Mapped[list["ReschedulingProposalItem"]] = relationship(
-        back_populates="daily_task"
+        back_populates="daily_task",
+        # Proposal entries cannot outlive their task (the FK is non-nullable).
+        cascade="all, delete-orphan",
     )
 
     @property

@@ -16,6 +16,7 @@ SAFE_ACTIONS = {
 }
 
 CONFIRMATION_ACTIONS = {
+    AutomationAction.CREATE_WEEKLY_PRIORITIES,
     AutomationAction.MOVE_TASK_TO_ANOTHER_DAY,
     AutomationAction.CHANGE_TASK_DURATION,
     AutomationAction.REDUCE_WEEKLY_GOAL,

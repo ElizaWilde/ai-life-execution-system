@@ -30,6 +30,8 @@ const defaultAutomationPreferences: EditableAutomationPreferences = {
   quiet_hours_start: "22:00",
   quiet_hours_end: "07:00",
   working_days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+  working_start_hour: 7,
+  working_end_hour: 22,
   preferred_study_periods: [],
 };
 
@@ -57,6 +59,8 @@ function editableAutomationPreferences(value: AutomationPreferences): EditableAu
     quiet_hours_start: value.quiet_hours_start.slice(0, 5),
     quiet_hours_end: value.quiet_hours_end.slice(0, 5),
     working_days: value.working_days,
+    working_start_hour: value.working_start_hour ?? 7,
+    working_end_hour: value.working_end_hour ?? 22,
     preferred_study_periods: value.preferred_study_periods.map((period) => ({
       start: period.start.slice(0, 5),
       end: period.end.slice(0, 5),
@@ -184,6 +188,10 @@ export default function SettingsPage() {
   }
 
   async function saveAllSettings() {
+    if (automation.working_start_hour >= automation.working_end_hour) {
+      setMessage("Working start hour must be earlier than working end hour.");
+      return;
+    }
     setSavingAll(true);
     try {
       const [user, savedAutomation, savedAppSettings] = await Promise.all([
@@ -374,7 +382,22 @@ export default function SettingsPage() {
         <main className="settings-panels">
           <section className="settings-card profile-settings" id="profile"><h2>Profile</h2><div className="settings-profile-grid"><div className="settings-fields"><label>Name<input value={settings.name} onChange={(event) => update("name", event.target.value)} /></label><label>Email<input type="email" value={settings.email} onChange={(event) => update("email", event.target.value)} /></label><label>Telegram chat ID<input inputMode="numeric" placeholder="Example: 123456789" value={automation.telegram_chat_id || ""} onChange={(event) => updateAutomation("telegram_chat_id", event.target.value || null)} /></label></div><div className="settings-fields"><label>Avatar<span className="avatar-control"><i style={settings.avatarDataUrl ? { backgroundImage: `url(${settings.avatarDataUrl})` } : undefined}>{settings.avatarDataUrl ? "" : settings.name.slice(0, 2).toUpperCase()}</i><b><SettingIcon name="upload" size={14} /> Change<input accept="image/*" onChange={changeAvatar} type="file" /></b></span></label><label>Time Zone<select value={settings.timezone} onChange={(event) => update("timezone", event.target.value)}><option value="Asia/Singapore">(UTC+08:00) Beijing, Shanghai, Singapore</option><option value="Europe/London">(UTC+00:00) London</option><option value="America/New_York">(UTC-05:00) New York</option><option value="America/Los_Angeles">(UTC-08:00) Los Angeles</option></select></label></div></div></section>
 
-          <section className="settings-card" id="preferences"><h2>Preferences</h2><div className="preference-grid"><label>Week starts on<select value={settings.weekStart} onChange={(event) => update("weekStart", event.target.value)}><option>Monday</option><option>Sunday</option></select></label><div className="theme-field"><span>Theme</span><div>{(["light", "dark", "auto"] as const).map((theme) => <button className={settings.theme === theme ? "active" : ""} key={theme} onClick={() => update("theme", theme)} type="button"><SettingIcon name={theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor"} size={15} /> {theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="working-days-field"><span>Working days</span><div>{workingDayOptions.map((day) => <label key={day.value}><input checked={automation.working_days.includes(day.value)} onChange={() => toggleWorkingDay(day.value)} type="checkbox" /><span>{day.label}</span></label>)}</div></div></div></section>
+          <section className="settings-card" id="preferences">
+            <h2>Preferences</h2>
+            <div className="preference-grid">
+              <label>Week starts on<select value={settings.weekStart} onChange={(event) => update("weekStart", event.target.value)}><option>Monday</option><option>Sunday</option></select></label>
+              <div className="theme-field"><span>Theme</span><div>{(["light", "dark", "auto"] as const).map((theme) => <button className={settings.theme === theme ? "active" : ""} key={theme} onClick={() => update("theme", theme)} type="button"><SettingIcon name={theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor"} size={15} /> {theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div>
+              <div className="working-days-field"><span>Working days</span><div>{workingDayOptions.map((day) => <label key={day.value}><input checked={automation.working_days.includes(day.value)} onChange={() => toggleWorkingDay(day.value)} type="checkbox" /><span>{day.label}</span></label>)}</div></div>
+              <fieldset className="working-hours-field">
+                <legend>Working hours</legend>
+                <div>
+                  <label>Start hour<select aria-label="Working start hour" value={automation.working_start_hour} onChange={(event) => updateAutomation("working_start_hour", Number(event.target.value))}>{Array.from({ length: 23 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}</select></label>
+                  <label>End hour<select aria-label="Working end hour" value={automation.working_end_hour} onChange={(event) => updateAutomation("working_end_hour", Number(event.target.value))}>{Array.from({ length: 23 }, (_, index) => index + 1).map((hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}</select></label>
+                </div>
+                <small>Limits the start-hour choices in Weekly Plan, including both selected hours. Existing tasks are unchanged.</small>
+              </fieldset>
+            </div>
+          </section>
 
           <section className="settings-card" id="ai-coach"><h2>AI Coach</h2><div className="coach-settings-grid"><label>Coaching tone<select value={settings.tone} onChange={(event) => update("tone", event.target.value)}><option value="supportive">Supportive</option><option value="direct">Direct</option><option value="reflective">Reflective</option></select></label><label>Planning strictness<select value={settings.strictness} onChange={(event) => update("strictness", event.target.value)}><option value="flexible">Flexible</option><option value="balanced">Balanced</option><option value="strict">Strict</option></select></label><label>Workload adjustment<select value={settings.adjustment} onChange={(event) => update("adjustment", event.target.value)}><option value="gentle">Gentle</option><option value="moderate">Moderate</option><option value="strong">Strong</option></select></label><label className="switch-setting"><span>Proactive reminders</span><button aria-pressed={settings.proactive} className={settings.proactive ? "on" : ""} onClick={() => update("proactive", !settings.proactive)} type="button"><i /></button><small>AI will proactively remind and suggest.</small></label><label className="switch-setting"><span>Floating coach movement</span><button aria-pressed={settings.coachRoamingEnabled} className={settings.coachRoamingEnabled ? "on" : ""} onClick={() => update("coachRoamingEnabled", !settings.coachRoamingEnabled)} type="button"><i /></button><small>Allow the coach to move around the screen.</small></label><label>Move every<select disabled={!settings.coachRoamingEnabled} value={settings.coachMoveIntervalSeconds} onChange={(event) => update("coachMoveIntervalSeconds", Number(event.target.value) as SettingsState["coachMoveIntervalSeconds"])}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>1 minute</option><option value={120}>2 minutes</option></select></label></div><div className="coach-checkboxes"><label>Focus on what matters most<span><input checked={settings.focusMatters} onChange={(event) => update("focusMatters", event.target.checked)} type="checkbox" /> AI helps me focus on high-impact tasks.</span></label><label>Protect deep work time<span><input checked={settings.protectDeepWork} onChange={(event) => update("protectDeepWork", event.target.checked)} type="checkbox" /> Block interruptions during focus sessions.</span></label><label>Learning from feedback<span><input checked={settings.learnFromFeedback} onChange={(event) => update("learnFromFeedback", event.target.checked)} type="checkbox" /> AI learns from your reviews and check-ins.</span></label></div></section>
 

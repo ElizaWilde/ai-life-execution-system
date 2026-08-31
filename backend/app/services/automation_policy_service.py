@@ -18,6 +18,7 @@ class AutomationAction(str, Enum):
     UPDATE_NOTION_TASKS = "update_notion_tasks"
     COMPLETE_TASK = "complete_task"
     CREATE_TASK = "create_task"
+    CREATE_WEEKLY_PRIORITIES = "create_weekly_priorities"
     UPDATE_TASK_DETAILS = "update_task_details"
     UPDATE_WEEKLY_GOAL_DETAILS = "update_weekly_goal_details"
     UPDATE_PHASE_DETAILS = "update_phase_details"
@@ -116,6 +117,11 @@ AUTOMATION_RULES: dict[AutomationAction, AutomationRule] = {
         AutomationAction.CREATE_TASK,
         AutomationLevel.REQUIRES_CONFIRMATION,
         "Add a task to the user's plan only after user confirmation.",
+    ),
+    AutomationAction.CREATE_WEEKLY_PRIORITIES: AutomationRule(
+        AutomationAction.CREATE_WEEKLY_PRIORITIES,
+        AutomationLevel.REQUIRES_CONFIRMATION,
+        "Add a batch of weekly priorities only after confirming the entire preview.",
     ),
     AutomationAction.UPDATE_TASK_DETAILS: AutomationRule(
         AutomationAction.UPDATE_TASK_DETAILS,

@@ -29,6 +29,8 @@ class StudyPeriod(BaseModel):
 
 
 class AutomationPreferenceFields(BaseModel):
+    working_start_hour: int = Field(default=7, strict=True, ge=0, le=22)
+    working_end_hour: int = Field(default=22, strict=True, ge=1, le=23)
     timezone: str = Field(default="Asia/Singapore", min_length=1, max_length=100)
     automation_enabled: bool = True
     morning_reminder_time: time = time(8, 0)
@@ -81,6 +83,16 @@ class AutomationPreferenceFields(BaseModel):
 
 
 class AutomationPreferenceUpdate(BaseModel):
+    working_start_hour: int | None = Field(default=None, strict=True, ge=0, le=22)
+    working_end_hour: int | None = Field(default=None, strict=True, ge=1, le=23)
+
+    @field_validator("working_start_hour", "working_end_hour")
+    @classmethod
+    def working_hours_cannot_be_null(cls, value: int | None) -> int:
+        if value is None:
+            raise ValueError("Working hours cannot be null")
+        return value
+
     timezone: str | None = Field(default=None, min_length=1, max_length=100)
     automation_enabled: bool | None = None
     morning_reminder_time: time | None = None

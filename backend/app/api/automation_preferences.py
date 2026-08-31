@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
@@ -31,6 +31,8 @@ def _to_read(preference: AutomationPreference) -> AutomationPreferenceRead:
         quiet_hours_start=preference.quiet_hours_start,
         quiet_hours_end=preference.quiet_hours_end,
         working_days=preference.working_days_json,
+        working_start_hour=preference.working_start_hour,
+        working_end_hour=preference.working_end_hour,
         preferred_study_periods=preference.preferred_study_periods_json,
         created_at=preference.created_at,
         updated_at=preference.updated_at,
@@ -51,4 +53,7 @@ def update_automation_preferences(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> AutomationPreferenceRead:
-    return _to_read(automation_preference_service.update(db, user.id, payload))
+    try:
+        return _to_read(automation_preference_service.update(db, user.id, payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
